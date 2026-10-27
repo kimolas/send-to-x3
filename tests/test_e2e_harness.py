@@ -158,8 +158,19 @@ def test_natural_less(a, b, less):
 # ---------------------------------------------------------------------------------------
 
 
+def test_spec_bundle_matches_the_app_by_default():
+    """The §10 template the harness falls back to is the app's default plugin: download
+    report and ``?confirm=1``, no sleep delivery."""
+    from sendtox3.config import Options
+    from sendtox3.plugin_bundle import build_device_json
+
+    for auto in (False, True):
+        assert sd.spec_device_json("http://h:1", "tok", auto_delivery=auto) == build_device_json(
+            base_url="http://h:1", device_token="tok", opts=Options(auto_delivery=auto))
+
+
 def test_build_sd_formats(tmp_path):
-    bundle = sd.spec_bundle_zip("http://127.0.0.1:9", "tok")
+    bundle = sd.spec_bundle_zip("http://127.0.0.1:9", "tok", auto_delivery=True)
     card = sd.build_sd(tmp_path / "sd", FW2, bundle=bundle, opds_servers=[
         sd.OpdsServer("S", "http://127.0.0.1:9/opds", "x3", "tok")], settings={"fontSize": 16})
     st = card.settings()
@@ -412,19 +423,39 @@ def test_mock_catalog_paging_and_downloads(mock):
     assert _req(base + "/device/v1/catalog?page=1&limit=9")[0] == 401
     st, body, hdr = _req(base + "/device/v1/catalog?page=1&limit=9", headers=auth)
     rows = json.loads(body)["items"]
-    assert st == 200 and len(rows) == 9 and rows[0]["id"] == ids[-1]  # newest first, page_size + 1
+    # "Get 10 new" first, then newest first; page_size + 1 rows
+    assert st == 200 and len(rows) == 9 and rows[0]["title"].startswith("Get 10 new · ") and rows[1]["id"] == ids[-1]
     assert hdr["Content-Length"] == str(len(body)) and hdr["Connection"] == "close"
     st, body, _ = _req(base + "/device/v1/catalog?page=2&limit=9", headers=auth)
     rows2 = json.loads(body)["items"]
-    assert [r["id"] for r in rows2] == [ids[1], ids[0]]  # offset (P-1)*(L-1) = 8
-    assert rows[0]["subtitle"].startswith("New · 2 words")
+    assert [r["id"] for r in rows2] == [ids[2], ids[1], ids[0]]  # offset (P-1)*(L-1) = 8
+    assert rows[1]["subtitle"].startswith("New · 2 words")
     st, epub, hdr = _req(base + f"/device/v1/items/{ids[0]}.epub", headers=auth)
     assert st == 200 and hdr["Content-Type"] == "application/epub+zip" and valid_epub(epub)
     st, txt, hdr = _req(base + f"/device/v1/items/{ids[0]}.txt", headers=auth)
     assert st == 200 and txt.decode().startswith("Item 0\n") and txt.endswith(b"\n") and b"\r" not in txt
     assert _req(base + "/device/v1/items/aaaaaaaaaa.epub", headers=auth)[0] == 404
     _, body, _ = _req(base + "/device/v1/catalog?page=2&limit=9", headers=auth)
-    assert json.loads(body)["items"][1]["subtitle"].startswith("Read on X3")
+    assert json.loads(body)["items"][2]["subtitle"].startswith("Read on X3")
+
+
+def test_mock_fetch_row(mock):
+    base, srv, _ = mock
+    auth = {"Authorization": "Bearer dev"}
+    rows = json.loads(_req(base + "/device/v1/catalog?page=1&limit=9", headers=auth)[1])["items"]
+    assert rows == [{"id": "none", "title": "Nothing new right now",
+                     "subtitle": "Share something to Send to X3, then open this list again."}]
+    assert _req(base + "/device/v1/items/none.epub", headers=auth)[0] == 404
+    ids = [_ingest(base, title=f"F{i}", text="x")["id"] for i in range(2)]
+    top = json.loads(_req(base + "/device/v1/catalog?page=1&limit=9", headers=auth)[1])["items"][0]
+    assert top["title"].startswith("Get 2 new · ") and top["id"].startswith("all-")
+    st, d1, _ = _req(base + f"/device/v1/items/{top['id']}.epub", headers=auth)
+    assert st == 200 and epub_info(d1)["chapters"] == 2
+    assert _req(base + f"/device/v1/items/{top['id']}.epub", headers=auth)[1] == d1  # repeats are identical
+    state = json.loads(_req(base + "/mock/state")[1])
+    assert all("fetch" in i["delivered"] for i in state["items"] if i["id"] in ids)
+    rows = json.loads(_req(base + "/device/v1/catalog?page=1&limit=9", headers=auth)[1])["items"]
+    assert rows[0]["id"] == "none"
 
 
 def test_mock_deliver_digest_idempotent_and_404(mock):
@@ -464,7 +495,9 @@ def test_mock_opds(mock):
     assert _req(base + "/opds", headers={"Authorization": "Basic " + base64.b64encode(b"x3:no").decode()})[0] == 401
     st, feed, hdr = _req(base + "/opds", headers=basic)
     text = feed.decode()
-    assert st == 200 and text.count("<entry>") == 50 and 'rel="next"' in text and 'rel="previous"' not in text
+    # "Get 52 new" + 50 books
+    assert st == 200 and text.count("<entry>") == 51 and 'rel="next"' in text and 'rel="previous"' not in text
+    assert "<entry><title>Get 52 new · " in text
     assert 'type="application/epub+zip"' in text and 'href="/opds/items/' in text
     assert f'href="{base}/opds?page=2"' in text  # absolute paging links
     import xml.etree.ElementTree as ET
@@ -472,9 +505,12 @@ def test_mock_opds(mock):
     ET.fromstring(feed)
     st, feed2, _ = _req(base + "/opds?page=2", headers=basic)
     assert feed2.decode().count("<entry>") == 2 and 'rel="previous"' in feed2.decode()
-    item_id = text.split('href="/opds/items/')[1].split(".epub")[0]
+    item_id = text.split('href="/opds/items/')[2].split(".epub")[0]
     st, epub, _ = _req(base + f"/opds/items/{item_id}.epub", headers=basic)
     assert st == 200 and valid_epub(epub)
+    fetch_id = text.split('href="/opds/items/')[1].split(".epub")[0]
+    st, epub, _ = _req(base + f"/opds/items/{fetch_id}.epub", headers=basic)
+    assert fetch_id.startswith("all-") and st == 200 and epub_info(epub)["chapters"] == 52  # as listed
 
 
 def test_mock_epub_structure():

@@ -4,8 +4,9 @@ The card carries one OPDS server (``/.crosspoint/opds.json``: the tap's ``/opds`
 ``x3``, password = device token) and ``opdsDownloadFolder=/Inbox``. 1.6.5 opens it
 from Home > OPDS Browser; 2.x from Home > Plugins > OPDS Browser (single server ->
 straight into the feed), then a publication page whose Confirm downloads. The device
-must send HTTP Basic, parse our Atom feed, and save the EPUB as
-``/Inbox/<Author - Title>.epub`` (default ``opdsFilenameFormat`` 0).
+must send HTTP Basic, parse our Atom feed, and save the first entry, "Get 2 new"
+(everything new as one EPUB, no author), as ``/Inbox/<title>.epub`` (default
+``opdsFilenameFormat`` 0: ``Author - Title``, here without an author).
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from e2e.sim import sd as sdmod
 from e2e.sim.nav import Nav
 from e2e.sim.runner import InputScript, run_sim
 
-from .base import Context, scenario, valid_epub
+from .base import Context, epub_info, scenario, valid_epub
 
 
 @scenario("S4", "OPDS browse + download", firmwares=("2.0.0rc", "1.6.5"))
@@ -35,7 +36,7 @@ def run(ctx: Context) -> None:
     nav = Nav(ctx.fw, s, has_opds_servers=True)
     nav.open_opds()
     s.shot("feed")
-    nav.opds_download(0)
+    nav.opds_download(0)  # "Get 2 new"
     s.shot("downloaded")
     s.quit()
     run_ = ctx.record_run(run_sim(ctx.program, card.root, s, ctx.out / "run", name="opds",
@@ -62,26 +63,31 @@ def run(ctx: Context) -> None:
               bool(ok_feeds) and all(e.response and e.response.header("Content-Length") for e in ok_feeds),
               [e.status for e in feeds])
     feeds = ok_feeds
-    author = None
+    fetch_title = fetch_href = None
     if feeds and feeds[0].response:
-        m = re.search(rb"<entry><title>[^<]*</title><author><name>([^<]*)</name>", feeds[0].response.body)
-        author = m.group(1).decode() if m else None
+        m = re.search(rb'<entry><title>([^<]*)</title><id>urn:sendtox3:(all-[a-z2-7]{10})</id>', feeds[0].response.body)
+        fetch_title, fetch_href = (m.group(1).decode(), f"/opds/items/{m.group(2).decode()}.epub") if m else (None, None)
+    ctx.check("first feed entry is \"Get 2 new\" without an author",
+              bool(fetch_title and fetch_title.startswith("Get 2 new · ")), fetch_title)
 
-    dls = [e for e in tap.find(f"/opds/items/{newest['id']}.epub") if e.status == 200]
-    ctx.check("downloaded the newest entry", bool(dls), [e.target for e in tap.exchanges()])
+    dls = [e for e in tap.find(fetch_href) if e.status == 200] if fetch_href else []
+    ctx.check("downloaded \"Get 2 new\"", bool(dls), [e.target for e in tap.exchanges()])
     ctx.check("download sent HTTP Basic too", bool(dls) and dls[0].request.header("Authorization") == want_auth)
-    ctx.check("the older entry was not downloaded", not tap.find(f"/opds/items/{older['id']}.epub"))
+    ctx.check("no single entry was downloaded", not tap.find(f"/opds/items/{older['id']}.epub")
+              and not tap.find(f"/opds/items/{newest['id']}.epub"))
     inbox = card.inbox_files()
     epubs = {n: i for n, i in inbox.items() if n.endswith(".epub")}
     ctx.check("exactly one EPUB landed in /Inbox", len(epubs) == 1, sorted(inbox))
     if epubs and dls and dls[0].response:
         name, info = next(iter(epubs.items()))
-        expected = f"{author} - {newest['title']}.epub" if author else None
-        ctx.check("file name is '<author> - <title>.epub'", expected is None or name == expected,
-                  {"name": name, "expected": expected})
+        expected = f"{fetch_title}.epub"
+        ctx.check("file name is '<title>.epub'", name == expected, {"name": name, "expected": expected})
         body = dls[0].response.body
         ctx.check("file equals the served EPUB", info.sha256 == hashlib.sha256(body).hexdigest())
-        ctx.check("it is a well-formed EPUB container", valid_epub(card.path(f"/Inbox/{name}").read_bytes()))
+        book = card.path(f"/Inbox/{name}").read_bytes()
+        meta = epub_info(book)
+        ctx.check("it is one well-formed EPUB with both entries", valid_epub(book) and meta.get("chapters") == 2,
+                  meta)
         ctx.artifact("downloaded_file", card.path(f"/Inbox/{name}"))
     ctx.check("no OPDS errors in the firmware log", not [ln for ln in run_.errors() if "OPDS" in ln or "HTTP" in ln],
               run_.errors())

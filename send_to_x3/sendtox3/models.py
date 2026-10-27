@@ -10,8 +10,9 @@ from typing import Literal, Optional
 IngestKind = Literal["auto", "url", "text", "html", "pdf"]
 IngestSource = Literal["http", "email", "ha_share", "admin", "test"]
 ItemKind = Literal["url", "text", "email", "pdf"]
-Channel = Literal["catalog", "auto", "opds", "push"]
-CHANNELS: tuple[str, ...] = ("catalog", "auto", "opds", "push")
+# "fetch": inside a "Get N new" bundle from the catalog or OPDS (one book, not named after the item).
+Channel = Literal["catalog", "auto", "opds", "push", "fetch"]
+CHANNELS: tuple[str, ...] = ("catalog", "auto", "opds", "push", "fetch")
 
 _B32 = "abcdefghijklmnopqrstuvwxyz234567"
 

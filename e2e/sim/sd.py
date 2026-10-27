@@ -109,7 +109,7 @@ def _json_bytes(doc: Any) -> bytes:
 
 
 def spec_device_json(base_url: str, device_token: str, *, delivery_format: str = "epub",
-                     auto_delivery: bool = True, inbox: str = INBOX) -> dict:
+                     auto_delivery: bool = False, inbox: str = INBOX) -> dict:
     """``device.json`` exactly as docs/ARCHITECTURE.md §10 specifies it.
 
     Used when the app's own ``sendtox3.plugin_bundle`` is not importable, so the
@@ -129,7 +129,7 @@ def spec_device_json(base_url: str, device_token: str, *, delivery_format: str =
             "page_size": 8,
         },
         "download": {
-            "url": f"{base}/device/v1/items/{{id}}.{delivery_format}",
+            "url": f"{base}/device/v1/items/{{id}}.{delivery_format}" + ("" if auto_delivery else "?confirm=1"),
             "headers": dict(auth),
             "dest_dir": inbox,
             "filename": f"{{title}}.{delivery_format}",
@@ -144,6 +144,17 @@ def spec_device_json(base_url: str, device_token: str, *, delivery_format: str =
                     "dest": f"{inbox}/{{event.ts}}-{{event.id}}.epub",
                 },
                 "toast": "Send to X3: new reading delivered",
+            }
+        }
+    else:
+        doc["events"] = {
+            "book.downloaded": {
+                "request": {
+                    "url": f"{base}/device/v1/fetched?plugin={{event.plugin}}",
+                    "method": "POST",
+                    "headers": {**auth, "Content-Type": "text/plain; charset=utf-8"},
+                    "body": "{event.path}",
+                },
             }
         }
     return doc

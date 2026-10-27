@@ -52,7 +52,7 @@ class Options:
     push_folder: str = "/Inbox"
 
     # CrossPoint 2.x plugin
-    auto_delivery: bool = True  # sleep.enter zero-tap delivery
+    auto_delivery: bool = False  # sleep.enter zero-tap delivery (off: fetch from the catalog's first row)
     delivery_format: str = "epub"  # "epub" | "txt" for catalog downloads and LAN push
     inbox_folder: str = "/Inbox"
 

@@ -58,7 +58,16 @@ async def test_catalog_paging_nine_items(client, store):
     assert resp.status == 200 and resp.headers["Content-Type"] == "application/json; charset=utf-8"
     _assert_device_framing(resp, body)
     rows = (await resp.json())["items"]
-    assert [r["id"] for r in rows] == [it.id for it in reversed(items)]
+    assert rows[0]["id"].startswith("all-")  # "Get 9 new"; with it the device shows 8 rows + Next Page
+    assert [r["id"] for r in rows[1:]] == [it.id for it in reversed(items)][:8]
+    page2 = (await (await client.get("/device/v1/catalog?page=2&limit=9", headers=AUTH)).json())["items"]
+    assert [r["id"] for r in page2] == [items[1].id, items[0].id]
+
+
+async def test_catalog_paging_eight_items(client, store):
+    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(8)]
+    rows = (await (await client.get("/device/v1/catalog?page=1&limit=9", headers=AUTH)).json())["items"]
+    assert len(rows) == 9 and [r["id"] for r in rows[1:]] == [it.id for it in reversed(items)]
     page2 = (await (await client.get("/device/v1/catalog?page=2&limit=9", headers=AUTH)).json())["items"]
     assert [r["id"] for r in page2] == [items[0].id]
 
@@ -72,7 +81,9 @@ async def test_catalog_bad_params_use_defaults(client, store):
 
 async def test_catalog_empty(client):
     resp = await client.get("/device/v1/catalog?page=1&limit=9", headers=AUTH)
-    assert resp.status == 200 and await resp.json() == {"items": []}
+    assert resp.status == 200 and await resp.json() == {"items": [{
+        "id": "none", "title": "Nothing new right now",
+        "subtitle": "Share something to Send to X3, then open this list again."}]}
 
 
 @pytest.mark.parametrize("fmt,ctype", [("epub", "application/epub+zip"), ("txt", "text/plain; charset=utf-8")])
@@ -102,7 +113,8 @@ async def test_deliver_nothing_pending_is_404_with_body(client):
     _assert_device_framing(resp, body)
 
 
-async def test_deliver_and_replay_identical_bytes(client, store):
+async def test_deliver_and_replay_identical_bytes(client, store, opts):
+    opts.auto_delivery = True
     a = add_item(store, "First", created_at=1)
     add_item(store, "Second", created_at=2)
     url = "/device/v1/deliver?ev=0a1b2c3d-1&ts=1761400000"

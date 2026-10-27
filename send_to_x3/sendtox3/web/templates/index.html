@@ -67,6 +67,8 @@
       <td>
         {% if it.delivered %}
           {% for ch, when in it.delivered|dictsort %}<span class="badge delivered" title="{{ when|ts }}">{{ ch }} {{ when|ts }}</span> {% endfor %}
+        {% elif unconfirmed and it.id in unconfirmed %}
+          <span class="badge pending" title="Sent in a Get N new download; the X3 confirms it the next time it joins Wi-Fi">sent {{ unconfirmed[it.id]|ts }}, not confirmed yet</span>
         {% else %}
           <span class="badge pending">waiting</span>
         {% endif %}

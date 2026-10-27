@@ -101,8 +101,8 @@ suffix); that is still 2.x.
 | Firmware | What you get with Send to X3 |
 |---|---|
 | **1.6.5** (stable) | No plugins. You fetch items with the X3's **OPDS Browser**, and/or the app copies new items onto the X3 whenever its **File Transfer** screen is open (LAN push). Perfectly usable. |
-| **2.0.0rc** (prerelease, 2026-10-19) | The **Send to X3 plugin**: a catalog of everything you shared on the X3, plus automatic delivery when the X3 goes to sleep. **Caveat:** on 2.0.0rc the delivery at sleep only happens once Wi-Fi has been used since the X3 last woke up (details in [Part 5a step 7](#step-7-automatic-delivery-at-sleep)). |
-| **A newer 2.x build** that includes the fix (develop commit `facaa87`, 2026-10-23, or any later release or nightly) | The same plugin with truly zero-tap delivery: every sleep on your home Wi-Fi fetches what is new. |
+| **2.0.0rc** (prerelease, 2026-10-19) | The **Send to X3 plugin**: open it on the X3 and press Confirm on the first row, **Get 3 new**, to download everything you shared since last time as one book, or pick single items from the list below it. Nothing arrives by itself. (Delivery at sleep is an option with a caveat on 2.0.0rc; see [Part 5a step 7](#step-7-optional-automatic-delivery-at-sleep).) |
+| **A newer 2.x build** (develop commit `facaa87`, 2026-10-23, or any later release or nightly) | The same plugin. The optional delivery at sleep also works with no taps. |
 
 Staying on 1.6.5 is fine. If you do, skip to Part 3.
 
@@ -276,7 +276,7 @@ everything as it is for now. Whenever you change something: select **Save**, the
 | X3 address for LAN push (`device_host`) | empty, or the X3's address (`192.168.1.60`) | Only for LAN push (Part 5b). |
 | LAN push check interval (seconds) (`push_poll_seconds`) | `20` | |
 | LAN push folder (`push_folder`) | `/Inbox` | |
-| Deliver when the X3 sleeps (`auto_delivery`) | on | 2.x plugin; see Part 5a step 7. |
+| Also deliver when the X3 sleeps (`auto_delivery`) | off | Leave it off: you fetch new items with **Get 3 new** on the X3. See Part 5a step 7. |
 | Download format (`delivery_format`) | `epub` | EPUB reads better and keeps titles. `txt` gives plain `.txt` files. |
 | X3 inbox folder (`inbox_folder`) | `/Inbox` | |
 | Keep items for (days) (`retention_days`) | `30` | Older items are removed from Home Assistant; files on the X3 stay. |
@@ -330,9 +330,10 @@ Open the web UI and select **Setup** at the top.
 
 ## Part 5a. X3 with CrossPoint 2.x: the plugin
 
-You end up with **Home > Plugins > Send to X3** on the X3: a list of everything you
-shared, newest first, and (optionally) automatic delivery when the X3 goes to sleep
-(on 2.0.0rc only once Wi-Fi has been used since the last wake; see step 7).
+You end up with **Home > Plugins > Send to X3** on the X3. Its first row, **Get 3 new
+· Oct 26 14.05**, downloads everything you shared since the last fetch as one book.
+Below it is everything you shared, newest first, to download one at a time. Nothing
+arrives on the X3 by itself (unless you turn on delivery at sleep, step 7).
 
 ### Step 1. Turn on plugins
 
@@ -345,7 +346,7 @@ screen now has a **Plugins** row.
 2. Pick your home network and type the password with the on-screen keyboard. (If the
    X3 already knows the network, it connects by itself; go on with item 4.)
 3. When asked **Save password for next time?**, choose **Yes**. This matters: the X3
-   uses the saved password for deliveries.
+   uses the saved password every time you open the plugin.
 4. The screen now says **Open this URL in your browser** and shows an address such as
    `http://192.168.1.60/`. That is the X3's address; it should be the one you reserved
    in Part 1. **Keep this screen open** for step 3.
@@ -389,11 +390,11 @@ the device token, so download it again if either changes.
 ### Step 4. Open the plugin
 
 1. On the X3 open **Home > Plugins**. You see **Send to X3** with the description
-   "Articles and notes you shared" (with automatic delivery on, it starts with
-   "Receives: sleep and current book."). A **Plugin Hub** row may also be there; you do
-   not need it.
+   "Receives: downloads. Articles and notes you shared." (The X3 tells the app which
+   downloads it saved; with delivery at sleep on it says "Receives: sleep and current
+   book." instead.) A **Plugin Hub** row may also be there; you do not need it.
 2. Select **Send to X3**. The X3 connects to Wi-Fi and loads the list. Before you have
-   shared anything it says **No entries found**. That is expected.
+   shared anything it has one row, **Nothing new right now**. That is expected.
 
 ### Step 5. Test with a pasted note
 
@@ -402,29 +403,47 @@ the device token, so download it again if either changes.
    select **Send to X3**.
 2. **Check:** the page shows **Sent to X3: Test note**, and the item appears in the
    **Queue** table with **waiting** in the **On the X3** column.
-3. On the X3 open **Home > Plugins > Send to X3**. The list shows **Test note** with a
-   line below it like `New · 120 words · note`. Select it (the confirm button says
-   **Fetch**).
-   The X3 shows **Downloading...**, then **Download complete**.
-4. Go back to Home (the X3 may restart; that is normal) and open **Library**: **Test
+3. On the X3 open **Home > Plugins > Send to X3**. The first row is **Get 1 new · Oct
+   26 14.05** (the date and time of your newest share), with a line below it like
+   `Everything new in one book · 120 words: Test note`. Under it is **Test note** itself
+   (`New · 120 words · note`).
+4. The first row is already selected: press **Confirm** (the button says **Fetch**). The
+   X3 shows **Downloading...**, then **Download complete**.
+5. Go back to Home (the X3 may restart; that is normal) and open **Library**: **Test
    note** is there. Open it and read.
-5. **Check in the web UI:** the item's **On the X3** column now shows `catalog` with the
-   time.
+6. **Check in the web UI:** the item's **On the X3** column shows **sent ..., not
+   confirmed yet**. The X3 confirms the saved file the next time it joins Wi-Fi: go back
+   to Home (the X3 restarts) and open **Home > Plugins > Send to X3** again. The web UI
+   now shows `fetch` with the time, and the first row reads **Nothing new right now**.
+   (Had the download been cancelled, it would be offered again, as **Get 1 new · ...
+   (2)**.)
+
+**Every day from now on:** share from your phone; when you want to read it, on the X3
+open **Home > Plugins > Send to X3**, press **Confirm** on the first row, then go back.
+Several new items arrive as one book with a chapter per item (one new item keeps its
+own title). To get a single item again, select it in the list below the first row (it
+then shows `catalog`).
 
 ### Step 6. Where the files go
 
 | How it arrived | File on the SD card | Title in the Library |
 |---|---|---|
-| You selected it in the catalog | `/Inbox/<title>.epub` (`.txt` with Download format `txt`) | The item's title |
-| Automatic delivery at sleep | `/Inbox/<numbers>.epub`, for example `/Inbox/1792929600-1a2b3c4d-1.epub` | One item: its title. Several: `Inbox: 3 items (2026-10-25 21:40)` |
+| You selected **Get 3 new** | `/Inbox/Get 3 new · Oct 26 14.05.epub` (a name is never reused: a second bundle in the same minute ends in ` (2)`) | One item: its title. Several: `Inbox: 3 items (2026-10-26 14:05)`. (With Download format `txt`: a `.txt` file, shown by its file name.) |
+| You selected a single item | `/Inbox/<title>.epub` (`.txt` with Download format `txt`) | The item's title |
+| Delivery at sleep (optional, step 7) | `/Inbox/<numbers>.epub`, for example `/Inbox/1792929600-1a2b3c4d-1.epub` | One item: its title. Several: `Inbox: 3 items (2026-10-25 21:40)` |
 
 You find them in **Library**, or in **Browse Files > Inbox**.
 
-### Step 7. Automatic delivery at sleep
+### Step 7. Optional: automatic delivery at sleep
 
-With **Deliver when the X3 sleeps** on (the default), every time the X3 goes to sleep
-on your home Wi-Fi it fetches everything you shared that has not reached it yet, as
-one EPUB.
+Skip this unless you want items to arrive with no taps at all. With **Also deliver
+when the X3 sleeps** on, every time the X3 goes to sleep on your home Wi-Fi it also
+fetches everything you shared that has not reached it yet, as one EPUB. **Get 3 new**
+keeps working either way.
+
+To turn it on: in Home Assistant open the app's **Configuration** tab, turn on **Also
+deliver when the X3 sleeps**, select **Save**, then **Restart** on the **Info** tab, and
+reinstall the plugin (step 3). Then test it:
 
 1. In the web UI, send another note, titled `Sleep test`.
 2. Put the X3 to sleep: hold the power button (or let it fall asleep on its own). On
@@ -451,13 +470,18 @@ or nightly the delivery at sleep needs no taps at all.
 
 **The cost.** With automatic delivery on, the X3 joins Wi-Fi at every sleep. That uses
 some battery and adds up to about 10 seconds before it sleeps (longer away from home,
-when the Pi cannot be reached). If you prefer to fetch items yourself, turn off
-**Deliver when the X3 sleeps**, **Save**, **Restart**, and reinstall the plugin
-(step 3). Until you reinstall, the X3 keeps asking at every sleep; the app answers
-"nothing new" and the **Channels** box shows a warning.
+when the Pi cannot be reached). To go back to fetching items yourself, turn off **Also
+deliver when the X3 sleeps**, **Save**, **Restart**, and reinstall the plugin (step 3).
+Until you reinstall, the X3 keeps asking at every sleep; the app answers "nothing new"
+and the **Channels** box shows a warning.
+
+**If you set up version 0.1.0:** reinstall the plugin after updating (step 3). The old
+plugin has delivery at sleep built in and cannot report saved files. If you saved the
+app's **Configuration** under 0.1.0, it may still have **Also deliver when the X3
+sleeps** on (it was the default then): turn it off, **Save** and **Restart** first.
 
 **Reinstall the plugin (step 3) after changing** the server address or port, the
-device token, **Deliver when the X3 sleeps**, **Download format** or **X3 inbox
+device token, **Also deliver when the X3 sleeps**, **Download format** or **X3 inbox
 folder**. (**New device token** with the X3's address in its box reinstalls it for
 you.)
 
@@ -513,12 +537,14 @@ keyboard (same values as above).
 
 1. In the web UI, send a note titled `OPDS test` (as in Part 5a step 5).
 2. On the X3 open **Home > OPDS Browser** (choose **Send to X3** if you have several
-   servers). The list shows your items, newest first.
-3. Select **OPDS test**. A progress bar runs; the file is saved in the download folder
-   as `<site> - <title>.epub` (here `note - OPDS test.epub`), and the list appears
-   again.
+   servers). The first entry is **Get 1 new · <date time>** (everything new as one
+   book); below it are your items, newest first.
+3. Select **OPDS test** itself. A progress bar runs; the file is saved in the download
+   folder as `<site> - <title>.epub` (here `note - OPDS test.epub`), and the list
+   appears again.
 4. **Check:** **Library** has **OPDS test**. In the web UI the item shows `opds` in
-   **On the X3**.
+   **On the X3**. From now on, selecting the first entry gets everything new at once
+   (`fetch` in the web UI; OPDS cannot confirm saved files, so it counts once sent).
 
 On CrossPoint 2.x the OPDS servers are under **Settings > Connectivity > OPDS
 Servers**, and with plugins on, the **OPDS Browser** is listed inside **Home > Plugins**.
@@ -727,10 +753,11 @@ Tick these off once:
 - [ ] The Setup page shows the Pi's reserved address, with `:8765`.
 - [ ] The X3 shows the reserved address on its **File Transfer > Join a Network**
       screen.
-- [ ] **2.x:** **Home > Plugins > Send to X3** lists your items; fetching one works.
-- [ ] **2.x:** after sharing something new and putting the X3 to sleep (on 2.0.0rc:
-      sleep from the catalog screen), the item is in the Library and shows `auto` in
-      the web UI.
+- [ ] **2.x:** after sharing something new, **Home > Plugins > Send to X3** starts with
+      **Get 1 new**; pressing Confirm puts it in the Library. The web UI shows **sent
+      ..., not confirmed yet**, then `fetch` once you went back to Home and opened the
+      plugin again. Nothing new arrives without that (unless you turned on step 7).
+- [ ] **2.x:** selecting a single item in the list below the first row works too.
 - [ ] **1.6.5:** **Home > OPDS Browser** lists your items; downloading one works.
 - [ ] **LAN push (if used):** opening **File Transfer > Join a Network** for half a
       minute copies new items (`push` in the web UI).

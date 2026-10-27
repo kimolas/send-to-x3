@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import tempfile
 import subprocess
 from pathlib import Path
@@ -84,7 +85,12 @@ async def test_feed_structure(client, store):
     body, root = await _feed(client)
     assert body.startswith(b"<?xml") and b"&nbsp;" not in body
     assert root.tag == "{http://www.w3.org/2005/Atom}feed"
-    entries = root.findall("a:entry", NS)
+    fetch, *entries = root.findall("a:entry", NS)
+    assert fetch.findtext("a:title", namespaces=NS).startswith("Get 2 new · ")
+    assert fetch.find("a:author", NS) is None  # the file name is just the title
+    fetch_links = fetch.findall("a:link", NS)
+    assert len(fetch_links) == 1 and fetch_links[0].get("type") == "application/epub+zip"
+    assert re.fullmatch(r"/opds/items/all-[a-z2-7]{10}\.epub", fetch_links[0].get("href"))
     assert [e.findtext("a:title", namespaces=NS) for e in entries] == ["Fish & Chips 'n' more", "Older"]
     assert b"Fish &amp; Chips" in body
     first = entries[0]
@@ -134,7 +140,8 @@ async def test_paging_limits_and_links(client, store):
     assert opds.PAGE_SIZE <= 50
     _, p1 = await _feed(client)
     ids1 = [e.findtext("a:id", namespaces=NS).split(":")[-1] for e in p1.findall("a:entry", NS)]
-    assert ids1 == newest_first[: opds.PAGE_SIZE]
+    assert ids1[0].startswith("all-")  # "Get N new" leads page 1 only
+    assert ids1[1:] == newest_first[: opds.PAGE_SIZE]
     assert p1.find("a:link[@rel='next']", NS).get("href") == "/opds?page=2"
     assert p1.find("a:link[@rel='previous']", NS) is None
     _, p2 = await _feed(client, "?page=2")

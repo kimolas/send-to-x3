@@ -41,7 +41,7 @@ from urllib.parse import unquote, urlsplit
 from . import delivery
 from .config import Options
 from .models import IngestRequest, Item, new_item_id
-from .store import SpooledRequest, Store
+from .store import FETCH_TITLE_PREFIX, SpooledRequest, Store
 from .textmodel import Document, Heading, Paragraph, clean_text
 
 log = logging.getLogger(__name__)
@@ -1379,8 +1379,10 @@ class Processor:
     def _reserve_title(self, raw: str) -> str:
         """Unique, firmware-safe title; reserved until the item is stored so concurrent
         requests cannot pick the same one. Titles of deleted or pruned items that were
-        downloaded as ``<title>.epub`` stay taken (the file is still on the X3)."""
-        taken = self.store.titles_in_use() | self.store.issued_titles() | self._reserved_titles
+        downloaded as ``<title>.epub`` stay taken (the file is still on the X3), and so do
+        the names of listed "Get N new" bundles (the X3 may save one under that name)."""
+        taken = (self.store.titles_in_use() | self.store.issued_titles() | self._reserved_titles
+                 | set(self.store.kv_prefixed(FETCH_TITLE_PREFIX).values()))
         try:
             title = unique_title(raw, taken)
         except Exception:  # noqa: BLE001

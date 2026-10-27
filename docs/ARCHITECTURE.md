@@ -9,7 +9,8 @@ review-fix round (2026-10-25).
 
 Share selected text, a URL, an email (body, link, or PDF attachment) from a phone or
 computer, and have it show up on an Xteink X3 running **stock, unmodified CrossPoint**
-as clean, image-free text, with no cable.
+as clean, image-free text, with no cable. The X3 fetches only when the user asks: the
+first row of the plugin catalog, "Get N new", downloads everything new as one book.
 
 ## 2. Components
 
@@ -23,7 +24,7 @@ as clean, image-free text, with no cable.
  Android HTTP Shortcuts ──────┘                                │  render .txt + .epub
  web UI (paste, upload) ──────────────────────────────────────▶┤
                                                                │
-                                     device API (HTTP :8765) ◀─┼──── 2.x plugin: catalog + sleep auto-delivery
+                                     device API (HTTP :8765) ◀─┼──── 2.x plugin: "Get N new" + catalog (+ optional sleep delivery)
                                      OPDS feed  (HTTP :8765) ◀─┼──── 1.6.5+: OPDS browser (EPUB)
                                      LAN push worker ──────────┴───▶ 1.6.5+: File Transfer /upload
 ```
@@ -101,7 +102,7 @@ scripts/check_all.sh            runs every verification level
 | `status` | `ready` \| `failed` | failed items keep an error message and a deliverable fallback body |
 | `error` | str | |
 | `word_count` | int | |
-| `delivered` | json | `{channel: unix_ts}` for `catalog`, `auto`, `opds`, `push` |
+| `delivered` | json | `{channel: unix_ts}` for `catalog`, `auto`, `opds`, `push`, `fetch` ("Get N new") |
 | `dedupe_key` | str | normalized URL (plus a hash of the sharer's comment, if any), or sha256 of the text or file bytes; a ready item with the same key within 24 h is returned instead of a new one |
 
 Storage under the data folder (`/data` in the add-on, `$SENDTOX3_DATA_DIR` elsewhere):
@@ -344,14 +345,93 @@ flight by wall-clock time (`created_at` ≥ start of this run).
 ### 7.2 Device API for CrossPoint 2.x plugin (`Authorization: Bearer <device_token>`)
 
 - `GET /device/v1/catalog?page=P&limit=L` → `{"items":[{"id","title","subtitle"}]}`.
-  `limit` is clamped to 2..17. Returns up to `L` items starting at offset
-  `(P-1)*(L-1)` (firmware sends `limit=page_size+1`, shows `page_size`, uses the extra
-  row to detect a next page). Newest first. `subtitle` =
+  `limit` is clamped to 2..17. The list is one **fetch row** followed by every item,
+  newest first; a page returns up to `L` rows of it starting at offset `(P-1)*(L-1)`
+  (firmware sends `limit=page_size+1`, shows `page_size`, uses the extra row to detect
+  a next page), so the fetch row is the first row of page 1 only. Item `subtitle` =
   `"<New|Read on X3 date> · <words> words|extraction failed · <host|site|note|email|PDF>"`.
+- **The fetch row** is how the X3 gets new reading by default (nothing is downloaded by
+  itself):
+  - Something new (items with no delivery on any channel, except items flagged
+    damaged): `{"id": "all-<key>", "title": "Get <n> new · <Mon> <d> <HH>.<MM>[ (<k>)]",
+    "subtitle": "Everything new in one book|file · <words> words: <titles, newest first>"}`
+    (subtitle cut to 160 characters). The time is the newest share in the bundle (no
+    `:`, which the firmware turns into `_`). The title is also the file name on the X3
+    (`<title>.<ext>`), so it must never repeat: when it is chosen (first listing of the
+    bundle) a ` (2)`, ` (3)`, ... is added while it matches, case-insensitively, a title
+    in `issued_titles` (every bundle title is reserved there when it is sent), any
+    item's title, or the title of any other stored bundle (in either format). It is
+    stored with the bundle (`kv` `fetch-title:<key>`), so the row keeps its title while
+    it is listed. **A name that was ever sent is never listed again**: when a listing
+    finds its stored title in `issued_titles` or among the item titles (a cancelled
+    download, a copy in the other format, an item renamed to it) it picks a new one; a
+    download keeps the title the X3 was shown. New items never take the title of a
+    listed bundle either (`Processor._reserve_title` counts the `fetch-title:*` rows).
+    Once a bundle's items count as delivered (received without confirm, or confirmed,
+    including other records that this settles) or leave a record through Requeue, the
+    bundle is **retired**: its stored copies and title are dropped and the id is
+    tombstoned (`kv` `fetch-retired:<key>`, dropped by the clean-up after
+    `retention_days`), so the same items (after a Requeue) always get a new id and a
+    stale row on any client is a 404.
+  - `key` = 10 base32 characters of SHA-256 over the `id:title` of every new item (not
+    the format), so the same new items give the same row in the catalog and in OPDS.
+    The bundle is built when the row is first listed: oldest first, one item as its own
+    file, several as a digest EPUB (`Inbox: <n> items (<date> <time>)`, one chapter per
+    item) or TXT files joined by `* * *`, up to 900 KB (the first item always goes in,
+    at any size: catalog downloads have no 1 MiB limit; uploaded EPUBs always go alone);
+    the rest is in the next bundle. It is stored (`deliveries` row `ev = fetch-<fmt>`,
+    `ts = key`) so repeated and resumed downloads get the same bytes; a new bundle of a
+    format first drops the previous one of that format. A download in the other format
+    (the plugin was installed with another `delivery_format`) is built from exactly the
+    same items. Nothing is marked when listing.
+  - Nothing new: `{"id": "none", "title": "Nothing new right now", "subtitle": "Share
+    something to Send to X3, then open this list again."}`. Downloading it is a 404, so
+    a habitual Confirm never re-downloads (and resets) an old item.
+  - The bundle cannot be built (an exception while rendering or storing, for example a
+    full disk): logged, and the row is `{"id": "none", "title": "New reading could not
+    be prepared", ...}`; the item rows still follow (the device channel shows a
+    warning). The OPDS feed leaves its first entry out instead.
+- `GET /device/v1/items/all-<key>.epub|.txt[?confirm=1]` → the stored bundle, sent with
+  an explicit Content-Length (`web/common.send_whole`). It counts as **received** only
+  when the client's TCP stack acknowledged every byte (Linux `SIOCOUTQ`, BSD
+  `SO_NWRITE` down to 0), or the client closed cleanly (FIN, seen in `eof_received`)
+  with nothing left unacknowledged; a reset, a timeout (20 s + 50 ms per KB) or an
+  error is not received. Handing the bytes to the socket is not enough: the kernel
+  takes a whole small book at once. The X3's lwIP window is about 5.7 KB, so its TCP
+  acknowledges only what the firmware has read. The title is reserved in
+  `issued_titles` either way, then:
+  - without `confirm` (OPDS, plugins installed by 0.1.0 or with `auto_delivery`): a
+    received bundle marks every item `delivered.fetch`;
+  - with `confirm=1` (the default plugin): recorded before sending and again after
+    (`kv` `fetch-sent:<casefolded file name>` = `{"ids", "at", "title", "key",
+    "complete"}`; `complete` never goes back to false). Its items stay new until the X3
+    confirms the file. While a complete record is younger than
+    `CONFIRM_GRACE_SECONDS` (2 h) its items are **awaiting confirmation**
+    (`awaiting_confirmation`): left out of new bundles, sleep delivery and LAN push, so
+    a habitual Confirm cannot replace the book being read and nothing is sent twice;
+    the first row then reads "Nothing new right now" with "Your last fetch (<time>) is
+    confirmed the next time the X3 joins Wi-Fi." Afterwards they count as new again,
+    under a new key (`retry`, so a new id and a new title: a second copy, never a
+    replacement). An incomplete record leaves the items new at once (the X3 kept
+    nothing). The queue page shows complete unconfirmed items as "sent ...,
+    not confirmed yet". **Requeue** (`delivery.requeue`) also takes the item out of
+    every record, so it is new at once and a late report cannot mark it again.
+  `none`, an unknown key, or a bundle replaced since the X3 loaded its list → `404`
+  with a small text body (the X3 shows **Download failed**).
+- `POST /device/v1/fetched?plugin=<plugin folder>`, body = the SD path the X3 saved
+  (from the plugin's `book.downloaded` event, §10; at most 1 KB read) → marks the items
+  sent under that file name (compared case-insensitively, folder ignored)
+  `delivered.fetch` and forgets that record and any other one whose items are all
+  delivered now. A report from another plugin (`plugin` not `sendtox3`) is ignored
+  without reading the body. Always `200 {"ok": true, "confirmed": <n>}` with a valid token, also for
+  unknown paths (single-item downloads report too), because a non-2xx answer would
+  keep the line in the X3's event queue and hold back the lines behind it. Unconfirmed
+  records are dropped by the daily clean-up after `retention_days`.
 - `GET /device/v1/items/<id>.epub` → application/epub+zip; `GET /device/v1/items/<id>.txt`
   → text/plain; charset=utf-8. Either marks `delivered.catalog`. The bundle's
   `download.url`/`filename` use the configured `delivery_format` (default epub).
-- `GET /device/v1/deliver?ev=<event.id>&ts=<event.ts>` → zero-tap auto-delivery:
+- `GET /device/v1/deliver?ev=<event.id>&ts=<event.ts>` → zero-tap auto-delivery (only
+  requested by a plugin installed with `auto_delivery` on, which is off by default):
   - With `auto_delivery` off: always `404 nothing new`, nothing is marked, and the
     device channel status shows "The X3 still requests sleep delivery although
     auto_delivery is off: reinstall the plugin to stop it (it also joins Wi-Fi at each
@@ -381,7 +461,10 @@ type="application/epub+zip" href="/opds/items/<id>.epub"` (root-relative). Title
 would not fit the firmware's 100-byte file name. Text is cleaned of everything that is
 not valid XML 1.0. Without credentials the feed answers 401 with `WWW-Authenticate:
 Basic` (2.x sends Basic only after a 401; 1.6.5 sends it up front). Downloads mark
-`delivered.opds`.
+`delivered.opds`. When something is new, page 1 starts with the fetch row as an entry
+(same title, `id` `urn:sendtox3:all-<key>`, no author, summary = the row's subtitle,
+`href="/opds/items/all-<key>.epub"`, always EPUB); downloading it marks
+`delivered.fetch`. There is no "Nothing new" entry (every OPDS entry is a book).
 
 ### 7.4 Admin UI
 
@@ -541,6 +624,43 @@ literal `{cfg.server}` URLs), plus `manifest.json` (title, description, version)
 `README.md`. Also the empty `<inbox_folder>/` (event downloads do not create folders).
 In the zip, folders are 0755 with the directory bit and files 0644.
 
+Shown with `auto_delivery` on. By default (off) the download URL ends in `?confirm=1`
+and the only event is a report of saved files:
+
+```json
+"events": {
+  "book.downloaded": {
+    "request": {
+      "url": "http://<host>:8765/device/v1/fetched",
+      "method": "POST",
+      "headers": {"Authorization": "Bearer <device_token>", "Content-Type": "text/plain; charset=utf-8"},
+      "body": "{event.path}"
+    }
+  }
+}
+```
+
+The firmware queues `book.downloaded` (vars `path`, `title`, `plugin`) after every
+catalog download that landed on the card (`PluginCatalogActivity::emitBookDownloaded`).
+Without `"connect": true` no Wi-Fi is started for it (only `sleep.enter` implies that),
+so the report goes out at the next Wi-Fi join (`WifiSelectionActivity` drains the
+outboxes on every connect). Opening the plugin joins Wi-Fi only when Wi-Fi is off:
+leaving a catalog restarts the X3, so the next open from Home joins, and reports,
+before the list loads; re-opening it from the plugin list keeps the connection and
+reports nothing. A drain delivers at most 4 lines across all event plugins, in folder
+order, and every catalog download of any plugin queues one `book.downloaded` line for
+each subscriber; the rest wait for later joins (hence the grace period in §7.2). The
+`?plugin={event.plugin}` query lets the app skip other plugins' reports. In the
+plugin picker the plugin's description starts with "Receives: downloads". With
+`auto_delivery` the report is left out: a `sleep.enter` line answered "nothing new"
+(404) stays queued and would hold back every report queued behind it, so those plugins
+are marked when a bundle is received.
+
+The zip carries an empty `.crosspoint/plugins/sendtox3/events.jsonl`, and the Wi-Fi
+install deletes that file (the device refuses empty uploads): lines queued for an
+older manifest (0.1.0's `sleep.enter`) would otherwise take up the drain budget ahead
+of the reports, and each such line counts against it even with no handler left.
+
 ```json
 {
   "title": "Send to X3",
@@ -572,7 +692,10 @@ In the zip, folders are 0755 with the directory bit and files 0644.
 }
 ```
 
-Options: `auto_delivery` (bool, default true) removes the `events` block when false;
+Options: `auto_delivery` (bool, default **false**) selects the `events` block:
+`book.downloaded` (the report of saved files, with `?confirm=1` on the download URL)
+when false, so the X3 never joins Wi-Fi or downloads by itself and the user fetches
+with the catalog's first row (§7.2); `sleep.enter` when true;
 `delivery_format` (`epub`|`txt`, default `epub`) picks the catalog download format;
 `inbox_folder` (default `/Inbox`) is `dest_dir` and the event `dest` folder.
 Auto-delivery is always EPUB (the filename cannot carry a title; EPUB metadata does).
@@ -791,7 +914,12 @@ def matches_title(text: str, title: str, *, url: str = "", site: str = "") -> bo
 
 # delivery.py
 def build_auto_delivery(store: Store, ev: str, ts: str) -> bytes | None   # None -> 404
-def catalog_page(store: Store, page: int, limit: int) -> dict             # {"items":[...]}
+def catalog_page(store: Store, page: int, limit: int, *, fmt: str = "epub") -> dict  # {"items":[...]}
+def build_fetch_bundle(store: Store, fmt: str = "epub") -> FetchBundle | None  # None: nothing new
+def fetch_lookup(store: Store, bundle_id: str, fmt: str = "epub") -> FetchBundle | None  # marks nothing
+def fetch_sent(store: Store, bundle: FetchBundle, *, confirm: bool = False, channel: str = "fetch") -> None
+def fetch_confirmed(store: Store, path: str) -> list[str]                 # item ids now delivered.fetch
+def unconfirmed_fetches(store: Store) -> dict[str, int]                   # {item_id: sent_at}
 def save_document(store: Store, item_id: str, doc: Document, *, item_title: str = "") -> None
 def load_document(store: Store, item_id: str) -> Document | None
 

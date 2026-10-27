@@ -665,10 +665,13 @@ class DeviceClient:
         if name.startswith("."):
             return  # hidden from /api/files unless showHiddenFiles is on: cannot verify
         entry = await self.find(folder, name)
-        if entry is None:
-            # One more look before concluding (a listing is cheap, a false failure is not:
-            # the item would stay queued while its file is already on the card).
-            await asyncio.sleep(self.backoff)
+        for attempt in range(3):
+            if entry is not None:
+                break
+            # Look again before concluding (a listing is cheap, a false failure is not: the
+            # item would stay queued while its file is already on the card, which can take a
+            # moment to list a file it just wrote).
+            await asyncio.sleep(self.backoff * (2 ** attempt))
             entry = await self.find(folder, name)
         if entry is None or entry.is_dir:
             raise DeviceRejected(f"{sd_join(folder, name)} is not on the device after a successful upload")

@@ -47,6 +47,15 @@ TITLE_NAMED_CHANNELS = ("catalog", "opds")
 DIR_MODE = 0o700
 FILE_MODE = 0o600
 _AUTO_SKIP_PREFIX = "auto_skip:"
+#: kv rows of "Get N new" bundles (delivery.py): ``fetch-title:<key>`` is a bundle's
+#: title; ``fetch-sent:<file name key>`` the items of a bundle sent to an X3 that
+#: confirms the saved file later (``{"ids": [...], "at": unix}``).
+FETCH_TITLE_PREFIX = "fetch-title:"
+FETCH_SENT_PREFIX = "fetch-sent:"
+#: ``fetch-retired:<key>`` = unix time: a bundle id that must never resolve again.
+FETCH_RETIRED_PREFIX = "fetch-retired:"
+#: ``fetch-names:<key>`` = every title the bundle was listed under (a JSON list).
+FETCH_NAMES_PREFIX = "fetch-names:"
 _ISSUED_BACKFILL_KEY = "migration:issued_titles_backfill"
 _STALE_TMP_SECONDS = 3600
 
@@ -121,6 +130,9 @@ def _row_to_item(row: sqlite3.Row) -> Item:
 def _title_key(title: str) -> str:
     """FAT compares long file names case-insensitively."""
     return unicodedata.normalize("NFC", title).casefold()
+
+
+title_key = _title_key
 
 
 def write_file(path: Path, data: bytes) -> None:
@@ -413,6 +425,27 @@ class Store:
             old = self._db.execute("SELECT n, file FROM deliveries WHERE created_at<?", (cutoff,)).fetchall()
             self._db.execute("DELETE FROM deliveries WHERE created_at<?", (cutoff,))
             self._db.execute("DELETE FROM issued_titles WHERE issued_at<?", (now - ISSUED_TITLE_DAYS * 86400,))
+            # Titles of bundles no longer stored, and sent bundles never confirmed.
+            for prefix in (FETCH_TITLE_PREFIX, FETCH_NAMES_PREFIX):
+                self._db.execute(
+                    "DELETE FROM kv WHERE k GLOB ? AND substr(k, ?) NOT IN "
+                    "(SELECT ts FROM deliveries WHERE ev GLOB 'fetch-*')",
+                    (prefix + "*", len(prefix) + 1))
+            for k, v in self._db.execute("SELECT k, v FROM kv WHERE k GLOB ?", (FETCH_SENT_PREFIX + "*",)).fetchall():
+                try:
+                    at = int(json.loads(v).get("at") or 0)
+                except (ValueError, TypeError, AttributeError):
+                    at = 0
+                if at < cutoff:
+                    self._db.execute("DELETE FROM kv WHERE k=?", (k,))
+            for k, v in self._db.execute("SELECT k, v FROM kv WHERE k GLOB ?",
+                                         (FETCH_RETIRED_PREFIX + "*",)).fetchall():
+                try:
+                    expired = int(v) < cutoff
+                except ValueError:
+                    expired = True
+                if expired:
+                    self._db.execute("DELETE FROM kv WHERE k=?", (k,))
         for i in ids:
             shutil.rmtree(self.item_dir(i), ignore_errors=True)
         for _, f in old:
@@ -424,7 +457,8 @@ class Store:
 
     # ------------------------------------------------------------- deliveries
     def get_delivery(self, ev: str, ts: str) -> Optional[tuple[list[str], bytes]]:
-        """A stored auto-delivery for this device event, for byte-identical replays."""
+        """A stored delivery (a device event's, or a "Get N new" bundle), for
+        byte-identical replays."""
         with self._lock:
             row = self._db.execute("SELECT n, item_ids, file FROM deliveries WHERE ev=? AND ts=?", (ev, ts)).fetchone()
             if not row:
@@ -446,10 +480,51 @@ class Store:
                 (ev, ts, json.dumps(ids), name, int(time.time())),
             )
 
+    def delete_deliveries(self, ev: str, *, keep_ts: str = "") -> list[str]:
+        """Drop the stored deliveries of ``ev`` except ``keep_ts`` (replaced "Get N new"
+        bundles). Returns the ``ts`` of those removed."""
+        with self._lock:
+            old = self._db.execute("SELECT n, ts, file FROM deliveries WHERE ev=? AND ts<>?",
+                                   (ev, keep_ts)).fetchall()
+            self._db.executemany("DELETE FROM deliveries WHERE n=?", [(r["n"],) for r in old])
+        for r in old:
+            try:
+                (self.deliveries_dir / r["file"]).unlink()
+            except FileNotFoundError:
+                pass
+        return [r["ts"] for r in old]
+
+    def delete_delivery(self, ev: str, ts: str) -> bool:
+        """Drop one stored delivery (and its file); False when there was none."""
+        with self._lock:
+            row = self._db.execute("SELECT n, file FROM deliveries WHERE ev=? AND ts=?", (ev, ts)).fetchone()
+            if row is None:
+                return False
+            self._db.execute("DELETE FROM deliveries WHERE n=?", (row["n"],))
+        try:
+            (self.deliveries_dir / row["file"]).unlink()
+        except FileNotFoundError:
+            pass
+        return True
+
+    def has_delivery(self, ev_glob: str, ts: str) -> bool:
+        """Whether a stored delivery matches (``ev`` as a GLOB pattern), without counting a hit."""
+        with self._lock:
+            return self._db.execute("SELECT 1 FROM deliveries WHERE ev GLOB ? AND ts=? LIMIT 1",
+                                    (ev_glob, ts)).fetchone() is not None
+
+    def issue_title(self, title: str, when: Optional[int] = None) -> None:
+        """Reserve ``title`` as the name of a file now on the X3 (see :meth:`issued_titles`)."""
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO issued_titles (key, title, issued_at) VALUES (?, ?, ?)",
+                             (_title_key(title), title, int(when or time.time())))
+
     def delivery_stats(self) -> list[dict]:
+        """The latest zero-tap (``sleep.enter``) deliveries; "Get N new" bundles are left out."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT ev, ts, item_ids, created_at, hits FROM deliveries ORDER BY n DESC LIMIT 20"
+                "SELECT ev, ts, item_ids, created_at, hits FROM deliveries WHERE ev NOT GLOB 'fetch-*' "
+                "ORDER BY n DESC LIMIT 20"
             ).fetchall()
         return [dict(r) | {"item_ids": json.loads(r["item_ids"])} for r in rows]
 
@@ -537,6 +612,16 @@ class Store:
     def kv_set(self, key: str, value: str) -> None:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (key, value))
+
+    def kv_delete(self, *keys: str) -> None:
+        with self._lock:
+            self._db.executemany("DELETE FROM kv WHERE k=?", [(k,) for k in keys])
+
+    def kv_prefixed(self, prefix: str) -> dict[str, str]:
+        """``{key: value}`` for every kv row whose key starts with ``prefix``."""
+        with self._lock:
+            rows = self._db.execute("SELECT k, v FROM kv WHERE substr(k, 1, ?) = ?", (len(prefix), prefix)).fetchall()
+        return {k: v for k, v in rows}
 
     def secret(self, name: str, configured: str = "") -> str:
         """Configured value wins; otherwise a generated token persisted in kv."""

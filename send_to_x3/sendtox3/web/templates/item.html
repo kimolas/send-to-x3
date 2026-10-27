@@ -14,6 +14,7 @@
     <dd>
       {% if item.delivered %}
         {% for ch, when in item.delivered|dictsort %}<span class="badge delivered">{{ ch }} {{ when|ts }}</span> {% endfor %}
+      {% elif unconfirmed and item.id in unconfirmed %}<span class="badge pending" title="Sent in a Get N new download; the X3 confirms it the next time it joins Wi-Fi">sent {{ unconfirmed[item.id]|ts }}, not confirmed yet</span>
       {% else %}<span class="badge pending">waiting</span>{% endif %}
     </dd>
     <dt>Files</dt>

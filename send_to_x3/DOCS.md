@@ -16,8 +16,8 @@ Android, Gmail filter, X3 setup) are in the `docs/` folder of the app repository
 
 | X3 firmware | How items arrive | What to set up |
 |---|---|---|
-| CrossPoint 2.x | **Plugin**: browse *Send to X3* on the X3 and download items, or get new items automatically (see *Automatic delivery* below) | Turn on plugins in the X3 settings, then install the plugin from the web UI (download the SD-card bundle, or push it to the X3 while it shows File Transfer) |
-| CrossPoint 1.6.5 or later | **OPDS**: open the OPDS browser on the X3 and download items | Add an OPDS server on the X3 with URL `http://<Home Assistant IP>:8765/opds`, user name `x3`, password = the device token |
+| CrossPoint 2.x | **Plugin**: open *Send to X3* on the X3 and select the first row, **Get 3 new**, to download everything new as one book (see *Fetching new items* below) | Turn on plugins in the X3 settings, then install the plugin from the web UI (download the SD-card bundle, or push it to the X3 while it shows File Transfer) |
+| CrossPoint 1.6.5 or later | **OPDS**: open the OPDS browser on the X3 and download **Get 3 new** (everything new) or single items | Add an OPDS server on the X3 with URL `http://<Home Assistant IP>:8765/opds`, user name `x3`, password = the device token |
 | Any | **LAN push**: new items are uploaded while the X3 shows its File Transfer screen | Set `device_host` to the X3's IP address |
 
 4. Send something: from the Home Assistant Companion app share sheet, an iPhone
@@ -27,14 +27,28 @@ Android, Gmail filter, X3 setup) are in the `docs/` folder of the app repository
 Use the IP address of your Home Assistant host in URLs for the X3. The X3 may not
 resolve `homeassistant.local`.
 
-### Automatic delivery (CrossPoint 2.x)
+### Fetching new items (CrossPoint 2.x)
 
-With `auto_delivery` on, the plugin fetches new items without any taps. On
-CrossPoint builds newer than 2.0.0rc (with develop commit facaa87, "Load WiFi
-settings from file before sleep mode"), new items are delivered when the X3 goes
-to sleep on your home Wi-Fi. On 2.0.0rc they arrive the next time the X3 uses
-Wi-Fi: opening Home > Plugins > Send to X3, OPDS or File Transfer. The plugin
-catalog always works, on every 2.x build.
+Nothing arrives on the X3 by itself. When you want your reading, open **Home >
+Plugins > Send to X3** and press **Confirm** on the first row, **Get 3 new · Oct 26
+14.05**: everything you shared since the last fetch is saved as one book in
+`/Inbox` (a single item keeps its own title inside the book). The rows below are
+everything you shared, newest first, to download one at a time. When nothing is
+new, the first row reads **Nothing new right now**.
+
+The X3 reports each saved download the next time it joins Wi-Fi: after you go back to
+Home (the X3 restarts) and open **Send to X3** again, before the list loads. Only then
+do the items count as delivered. Meanwhile the web UI's queue shows **sent ..., not
+confirmed yet** and the first row reads **Nothing new right now**, so a habitual
+Confirm never replaces the book you are reading. A cancelled or failed download is
+offered again; a fetch that is never reported comes back after two hours under a new
+name. Two fetches never get the same file name (a repeat ends in ` (2)`).
+
+`auto_delivery` (off by default) also delivers new items with no taps when the X3
+goes to sleep on your home Wi-Fi. It joins Wi-Fi at every sleep, and needs a
+CrossPoint build newer than 2.0.0rc (with develop commit facaa87, "Load WiFi
+settings from file before sleep mode"); on 2.0.0rc items arrive the next time the
+X3 uses Wi-Fi. Reinstall the plugin after changing it.
 
 ## Network
 
@@ -150,7 +164,7 @@ Which mail is used (the app fails closed):
 
 | Option | Default | What it does |
 |---|---|---|
-| `auto_delivery` | `true` | CrossPoint 2.x plugin: download new items automatically. They are delivered when the X3 goes to sleep on your home Wi-Fi on builds newer than 2.0.0rc (with develop commit facaa87); on 2.0.0rc they arrive the next time the X3 uses Wi-Fi (opening Home > Plugins > Send to X3, OPDS or File Transfer). Reinstall the plugin after changing it. |
+| `auto_delivery` | `false` | Off: you fetch new items with the first row of Home > Plugins > Send to X3 (**Get 3 new**). On: the CrossPoint 2.x plugin also downloads new items automatically, joining Wi-Fi at every sleep, on builds newer than 2.0.0rc (with develop commit facaa87); on 2.0.0rc they arrive the next time the X3 uses Wi-Fi. Reinstall the plugin after changing it. |
 | `delivery_format` | `epub` | `epub` or `txt` for plugin catalog downloads and LAN push. EPUB reads better and keeps titles. Sleep delivery always uses EPUB. Reinstall the plugin after changing it. |
 | `inbox_folder` | `/Inbox` | Folder on the X3's SD card where the plugin saves downloads. |
 | `device_host` | empty | X3 IP address for LAN push. Empty: LAN push is off. |

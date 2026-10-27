@@ -7,10 +7,10 @@ Daily use, once [setup](SETUP.md) is done. Example addresses: the Pi is
 
 | Your setup | You do | It arrives |
 |---|---|---|
-| CrossPoint 2.x, newer than 2.0.0rc, automatic delivery on | Share from the phone, then just put the X3 to sleep at home | At the next sleep: one EPUB with everything new |
-| CrossPoint 2.0.0rc, automatic delivery on | Share, then on the X3 open **Home > Plugins > Send to X3** before putting it to sleep | When the catalog opens (anything waiting is delivered) or at the sleep that follows |
-| CrossPoint 2.x, catalog only | Share, then **Home > Plugins > Send to X3** and select the item | Right away, one file per item |
-| CrossPoint 1.6.5, OPDS | Share, then **Home > OPDS Browser** and select the item | Right away |
+| CrossPoint 2.x (the default) | Share from the phone, then on the X3 open **Home > Plugins > Send to X3** and press **Confirm** on the first row, **Get 3 new** | Right away: one EPUB with everything new (one new item keeps its own title) |
+| CrossPoint 2.x, one item | Share, then **Home > Plugins > Send to X3** and select the item below the first row | Right away, one file for that item |
+| CrossPoint 2.x, with the optional delivery at sleep | Share, then put the X3 to sleep at home (on 2.0.0rc: open the plugin first) | At the next sleep: one EPUB with everything new |
+| CrossPoint 1.6.5, OPDS | Share, then **Home > OPDS Browser** and select the first entry, **Get 3 new**, or a single item | Right away |
 | Any firmware, LAN push | Share, then on the X3 open **File Transfer > Join a Network** for half a minute | All new items, one file each |
 
 ## What you can send, and what arrives
@@ -78,16 +78,17 @@ Delivery at sleep and OPDS always use EPUB.
 
 | Way | Firmware | What happens | File on the SD card |
 |---|---|---|---|
-| **Automatic delivery at sleep** | 2.x plugin | When the X3 goes to sleep on your home Wi-Fi, it fetches everything new as one EPUB. | `/Inbox/<numbers>.epub` |
-| **Catalog** | 2.x plugin | **Home > Plugins > Send to X3** lists everything in the queue, newest first, 8 per page with **Next Page**. You select an item to fetch it. | `/Inbox/<title>.epub` |
+| **Get 3 new** | 2.x plugin, OPDS | The first row of **Home > Plugins > Send to X3** (and the first OPDS entry when something is new) downloads everything new as one EPUB. | `/Inbox/Get 3 new · Oct 26 14.05.epub` (OPDS: `Get 3 new · Oct 26 14.05.epub` in the OPDS download folder) |
+| **Catalog** | 2.x plugin | Below the first row, **Home > Plugins > Send to X3** lists everything in the queue, newest first, 8 rows per page with **Next Page**. You select an item to fetch it. | `/Inbox/<title>.epub` |
 | **OPDS** | 1.6.5 and 2.x | **OPDS Browser** lists everything, newest first, 25 per page. You select an item to download it. | `<site> - <title>.epub` in the OPDS download folder |
+| **Delivery at sleep** (optional, off by default) | 2.x plugin | When the X3 goes to sleep on your home Wi-Fi, it fetches everything new as one EPUB. | `/Inbox/<numbers>.epub` |
 | **LAN push** | 1.6.5 and 2.x | While **File Transfer** is open, the app copies every new item onto the X3. | `/Inbox/<title>.epub`, or `<title> (2).epub` if the name is taken |
 
 How they work together:
 
-- **"New" means "not yet on the X3 by any way".** Automatic delivery and LAN push only
-  send new items. An item you already fetched from the catalog or OPDS is not sent
-  again at sleep or by push.
+- **"New" means "not yet on the X3 by any way".** **Get 3 new**, delivery at sleep and
+  LAN push only send new items. An item you already fetched from the catalog or OPDS
+  is not in the next **Get 3 new**, and is not sent again at sleep or by push.
 - **The catalog and OPDS always list everything** you shared (within the retention
   period), so you can fetch an item again at any time. In the catalog the line under
   each title starts with `New` for items that never reached the X3, and with
@@ -96,10 +97,54 @@ How they work together:
 - **Fetching the same item again** from the catalog or OPDS replaces the file and
   starts it from the beginning (the X3 forgets the reading position of a replaced
   file).
-- The web UI's **On the X3** column shows how each item arrived: `catalog`, `auto`
-  (delivery at sleep), `opds` or `push`, with the time. **waiting** means not yet.
+- The web UI's **On the X3** column shows how each item arrived: `fetch` (**Get 3
+  new**), `catalog`, `auto` (delivery at sleep), `opds` or `push`, with the time.
+  **waiting** means not yet.
+
+### Get 3 new in detail
+
+- The row's title is the number of new items and the time of the newest share, for
+  example **Get 3 new · Oct 26 14.05**. It is also the file name. A name is never used
+  twice: if two fetches would get the same one (several uploaded EPUBs shared in the
+  same minute, which always go one per book), the later one ends in ` (2)`, ` (3)`, so
+  a later fetch never replaces an earlier book. The line below the title lists the new
+  titles, newest first.
+- With the EPUB format (the default), several items arrive as one book titled
+  `Inbox: <n> items (<date> <time>)`, one chapter per item, oldest first; jump between
+  them with **Select Chapter** in the reader. One new item arrives as itself, with its
+  own title in the Library. With **Download format** `txt` you get one `.txt` file with
+  the items one after the other, and the Library shows its file name.
+- One fetch holds up to about 900 KB of books; anything beyond is in the next **Get N
+  new**. Uploaded EPUBs always come one per fetch. A single item larger than 900 KB
+  still comes whole.
+- **The X3 confirms what it saved.** Items count as delivered only once the X3 reports
+  the saved file. It does so the next time it joins Wi-Fi: after you go back to Home
+  (the X3 restarts) and open **Send to X3** again, before the list loads. Going back
+  only to the plugin list and opening it again keeps Wi-Fi on, so nothing is reported
+  yet. (That is why **Home > Plugins** says "Receives: downloads" under the plugin.)
+- Until the report arrives the web UI shows **sent ..., not confirmed yet**, and the
+  first row reads **Nothing new right now** with "Your last fetch (...) is confirmed the
+  next time the X3 joins Wi-Fi", so pressing Confirm out of habit never replaces the
+  book you are reading. Should no report come within two hours, the same items are
+  offered again under a new name (a second copy, never a replacement).
+- If a download is cancelled (**Back**) or the Wi-Fi drops before the X3 has the whole
+  book, the same items are offered again at once, with ` (2)` added to the name: a name
+  that was ever sent is never offered again, so no press can replace a book on the X3.
+- With nothing new the row reads **Nothing new right now**. Selecting it shows
+  **Download failed** and changes nothing.
+- If the app cannot prepare the download (for example the Home Assistant disk is full)
+  the first row reads **New reading could not be prepared**; the items below it still
+  download one by one, and the app's log says what went wrong.
+- Something you share while the list is open simply waits for the next **Get N new**.
+  Pressing an old **Get N new** row can show **Download failed** when the list was
+  loaded again elsewhere in the meantime (the OPDS feed, or another page 1) with
+  different new items; go back and open **Send to X3** again.
 
 ### Delivery at sleep in detail
+
+Off by default; [Setup, Part 5a step 7](SETUP.md#step-7-optional-automatic-delivery-at-sleep)
+turns it on.
+
 
 - One sleep, one EPUB. One new item: the EPUB is titled like the item. Several: the
   EPUB is titled `Inbox: <n> items (<date> <time>)` and each item is a chapter, so
@@ -116,7 +161,7 @@ How they work together:
   asleep (up to about 10 seconds; longer if it is on another Wi-Fi that it knows).
   Items wait in the queue until you are back.
 - **On 2.0.0rc** a plain wake, read, sleep does not deliver; see the caveat in
-  [Setup, Part 5a step 7](SETUP.md#step-7-automatic-delivery-at-sleep).
+  [Setup, Part 5a step 7](SETUP.md#step-7-optional-automatic-delivery-at-sleep).
 
 The web UI's **Channels** box lists **Recent automatic deliveries** with the number of
 items in each.
@@ -158,8 +203,8 @@ with their sizes), a **Preview** of the text, and the buttons **Deliver again** 
 
 - **Requeue** (in the Queue table, for items that already reached the X3) or **Deliver
   again** (on the item page) forgets that the item was delivered. It counts as new
-  again: the next delivery at sleep or LAN push sends it once more, and the catalog
-  shows `New`.
+  again: the next **Get 3 new** (under a new name, so the copy already on the X3 stays),
+  delivery at sleep or LAN push sends it once more, and the catalog shows `New`.
 - **Delete** removes the item from Home Assistant (after a confirmation). Copies already
   on the X3 stay there, and so does its name (see [How it looks on the
   X3](#how-it-looks-on-the-x3)).

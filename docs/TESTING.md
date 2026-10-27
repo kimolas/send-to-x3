@@ -24,17 +24,17 @@ test, which is started on its own.
 
 ## Latest measured results
 
-These are the most recent runs on the development Mac (Apple Silicon, 2026-10-25),
-all on the final code (after the third review-fix round), with
+These are the most recent runs on the development Mac (Apple Silicon, 2026-10-27),
+all on version 0.2.0 (after its five review rounds), with
 `scripts/check_all.sh --all` plus `e2e/ha/devcontainer_install.sh`.
 
 | Level | Result |
 |---|---|
-| 1. Unit and integration tests | 2327 passed, 35 skipped (about 66 s) |
+| 1. Unit and integration tests | 2401 passed, 35 skipped (about 75 s) |
 | 2. Docker tests (image build and smoke, epubcheck, GreenMail IMAP, Android import) | 13 passed, 3 skipped (OCR tests that need tesseract on the host; OCR runs in the image) |
 | 3. Firmware host harnesses | 46 passed, against CrossPoint 1.6.5, 2.0.0rc and develop `3f387a9` |
-| 4. Simulator end-to-end, real app (`python -m sendtox3`) | 11 of 11 scenario runs passed, 188 of 188 checks |
-| 4. Simulator end-to-end, real app image (docker) | 9 of 9 scenario runs passed, 148 of 148 checks |
+| 4. Simulator end-to-end, real app (`python -m sendtox3`) | 12 of 12 scenario runs passed, 258 of 258 checks |
+| 4. Simulator end-to-end, real app image (docker) | 9 of 9 scenario runs passed, 176 of 176 checks |
 | 5. Supervisor validation | 58 of 58 checks passed, 27 form fields |
 | 5. Install in a real Supervisor | Passed (devcontainer `5-apps`, stable channel): build, install, start, `/healthz`, 401 without a token, paste form and 20 MB upload through ingress, Companion app share |
 
@@ -154,7 +154,7 @@ What is covered, by area:
 | EPUB and TXT output, firmware-safe titles, uploaded EPUBs (size and time limits) | `test_render_epub.py`, `test_render_txt.py`, `test_names.py`, `test_render_validation.py` (corpus part), `test_fix_D_epub_urls.py`, `test_fix2_D_epub.py` |
 | Email: parsing, the acceptance filter (plus-tag, allowed senders, DMARC/DKIM), refusing all mail when neither `allowed_senders` nor `imap_plus_tag` is set or when `'*'` is used in a plain INBOX, the IMAP worker against a fake server (refused mail left unread, the first check of an untagged INBOX, the attempt counter) | `test_email.py`, `test_email_accept.py`, `test_imap_worker.py`, `test_fix_C_*.py`, `test_fix2_C_email.py`, `test_fix2_C_wildcard.py`, `test_fix2_C_imap.py` |
 | Home Assistant Companion app shares (`mobile_app.share`) against a fake Home Assistant | `test_ha_share.py`, `test_fix_G_ha_share.py` |
-| X3 delivery: plugin catalog paging, downloads, sleep delivery (repeat requests get the same file, digests, size caps, and "nothing new" when `auto_delivery` is off), OPDS feed | `test_delivery.py`, `test_web_device.py`, `test_opds.py`, `test_fix_A_delivery.py` |
+| X3 delivery: the "Get N new" row (bundle contents, stable ids and bytes, file names that never repeat, replaced bundles, "Nothing new right now", TXT bundles, a download in the other format, a failing build that still lists the items, the X3's confirmation of saved files, a dropped download marking nothing, a read-all-then-close counting, the TCP-acknowledgement decision, items awaiting the report kept out of new bundles and sleep delivery and re-offered after the grace period under a new name, other plugins' reports ignored, the queue's "not confirmed yet"), plugin catalog paging with that row, downloads, sleep delivery (repeat requests get the same file, digests, size caps, and "nothing new" when `auto_delivery` is off, the default), OPDS feed with its first entry | `test_fetch_bundle.py`, `test_delivery.py`, `test_web_device.py`, `test_opds.py`, `test_fix_A_delivery.py` |
 | LAN push and plugin install against a fake CrossPoint File Transfer server (1.6.5 and 2.0) | `test_lan_push.py`, `test_device_client.py`, `test_plugin_bundle.py`, `test_fix_E_plugin_bundle.py`, `test_fix2_E_plugin_bundle.py` |
 | The admin web UI: Home Assistant ingress, token sign-in, CSRF protection, forms, the Setup page (the Android HTTP Shortcuts file filled in with the server address and token, **New device token**, address warnings), plugin bundle download and install, warnings | `test_web_admin.py`, `test_fix_E_web.py`, `test_fix2_E_web.py` |
 | Start-up, worker restarts, daily clean-up, `--show-tokens`, retrying the server address detection | `test_web_main.py`, `test_fix_E_main.py` |
@@ -280,7 +280,7 @@ This builds three simulators the first time (about 1.5 minutes each) and the wir
 harness, then runs:
 
 1. every scenario on every firmware against the app started as `python -m sendtox3`
-   (11 runs: `e2e/run_e2e.py -f all -b local`);
+   (12 runs: `e2e/run_e2e.py -f all -b local`);
 2. every scenario on the two releases (2.0.0rc and 1.6.5) against the app's Docker
    image (9 runs: `e2e/run_e2e.py -f releases -b docker`). Docker Desktop must be
    running.
@@ -288,7 +288,7 @@ harness, then runs:
 **What you should see** for each backend is a table like:
 
 ```
-S1   2.0.0rc  PASS    20.1s  16/16 checks
+S1   2.0.0rc  PASS    33.7s  27/27 checks
 S2   2.0.0rc  PASS    67.7s  28/28 checks
 ...
 report: /Users/<you>/.cache/sendtox3-e2e/runs/<date-time>/report.json
@@ -298,12 +298,12 @@ report: /Users/<you>/.cache/sendtox3-e2e/runs/<date-time>/report.json
 
 | Id | Firmware | What it proves |
 |---|---|---|
-| **S1** catalog | 2.0.0rc | On the X3, Home > Plugins > Send to X3 lists what you shared (the request carries the device token), and selecting entries saves `/Inbox/<title>.epub`, byte for byte what the app served. A title full of characters the firmware refuses (`Wait... what? A/B: …`) is made safe by the app and still downloads |
-| **S2** sleep delivery | 2.0.0rc, `3f387a9` | Going to sleep fetches everything new as one EPUB, `/Inbox/<time>-<event>.epub` (a two-chapter digest for two items). With nothing new the app answers "nothing" (404), the X3 writes no file and keeps the request queued; the next attempt repeats the same request and receives the next new item. On 2.0.0rc it also proves that a sleep right after waking sends nothing (see the finding below); on `3f387a9` the plain wake, sleep cycle delivers with no taps |
+| **S1** catalog | 2.0.0rc, `3f387a9` | The installed plugin has no sleep delivery (the default), only the download report. On the X3, Home > Plugins > Send to X3 starts with **Get 2 new** (the request carries the device token); Confirm on it saves `/Inbox/Get 2 new · <date time>.epub`, one EPUB with both items, and queues `book.downloaded`. Until the report the first row reads **Nothing new right now** (awaiting the report, not offered again); after the restart, opening the plugin again POSTs the saved path before the list loads, which then counts the items. Selecting the entries below saves `/Inbox/<title>.epub`, byte for byte what the app served. A title full of characters the firmware refuses (`Wait... what? A/B: …`) is made safe by the app and still downloads |
+| **S2** sleep delivery | 2.0.0rc, `3f387a9` | With the optional `auto_delivery` on, going to sleep fetches everything new as one EPUB, `/Inbox/<time>-<event>.epub` (a two-chapter digest for two items). With nothing new the app answers "nothing" (404), the X3 writes no file and keeps the request queued; the next attempt repeats the same request and receives the next new item. On 2.0.0rc it also proves that a sleep right after waking sends nothing (see the finding below); on `3f387a9` the plain wake, sleep cycle delivers with no taps |
 | **S3** LAN push | 2.0.0rc, 1.6.5 | With the X3 on Home > File Transfer > Join a Network, the app finds the X3's own web server, creates `/Inbox` if needed and uploads one file per item. When a different file with the same name is already on the card, it saves `<title> (2).<ext>` and leaves the old file alone. Run with EPUB (the default) and with TXT |
-| **S4** OPDS | 2.0.0rc, 1.6.5 | The X3's OPDS browser signs in with user `x3` and the device token, reads the feed and saves the newest entry as `/Inbox/<author> - <title>.epub` |
+| **S4** OPDS | 2.0.0rc, 1.6.5 | The X3's OPDS browser signs in with user `x3` and the device token, reads the feed and saves its first entry, **Get 2 new** (no author), as `/Inbox/Get 2 new · <date time>.epub`: one EPUB with both items, and no single entry downloaded |
 | **S5** reading | 2.0.0rc, 1.6.5 | The EPUB and TXT the app serves open in the real reader; pages 1 and 2 have text on them, page 2 differs from page 1, and the firmware logs no errors. Screenshots are saved for a human to look at |
-| **W1** wire | 2.0.0rc, `3f387a9` | The X3's own HTTP code (not the simulator's stand-in) against the app: the exact bytes the X3 sends, catalog, download, sleep delivery, and a "nothing new" reply that keeps the request queued |
+| **W1** wire | 2.0.0rc, `3f387a9` | The X3's own HTTP code (not the simulator's stand-in) against the app: the exact bytes the X3 sends, catalog, download, the **Get 1 new** row (saved as `/Inbox/<row title>.epub`, then **Nothing new right now**), sleep delivery with `auto_delivery` on, a "nothing new" reply that keeps the request queued, and with the default plugin the confirmation (`?confirm=1`, then `POST /device/v1/fetched` with the saved path at the next drain; nothing is counted before it; a sleep wants no Wi-Fi) |
 
 Checks never read text off the screen. They use the screens the firmware logs, other
 firmware log lines, the files on the simulated SD card, the HTTP traffic recorded
@@ -540,12 +540,36 @@ For an X3 on 2.0.0rc or a newer 2.x build.
 
   (Instead of C2 and C3 you can select **Download SD-card plugin bundle (zip)** and
   unzip it at the top of the X3's SD card, as the Setup page explains.)
-- [ ] C4. On the X3: **Home > Plugins > Send to X3**. The list shows your items,
-  newest first; each subtitle reads like `New · 1,234 words · example.com`.
-- [ ] C5. Select one entry. You should see **Download complete**. In the web UI the
-  item now shows `catalog` under **On the X3**.
-- [ ] C6. On the X3: **Home > Browse Files > Inbox**. The file is named after the
-  article's title. Open it (see section F).
+- [ ] C4. On the X3: **Home > Plugins > Send to X3**. The first row reads like **Get 2
+  new · Oct 26 14.05**, with the new titles below it. Under it are your items, newest
+  first; each subtitle reads like `New · 1,234 words · example.com`.
+- [ ] C5. Press **Confirm** on the first row. You should see **Download complete**. In
+  the web UI the new items show **sent ..., not confirmed yet**. Go back to Home and
+  open the plugin again (this joins Wi-Fi, and the X3 reports the saved file): the
+  first row reads **Nothing new right now**, and the web UI shows `fetch`. Pressing
+  Confirm on **Nothing new right now** shows **Download failed** and nothing changes.
+- [ ] C5b. **A cancelled fetch is offered again.** Share a long PDF or several items,
+  press Confirm on **Get N new** and press **Back** while it downloads. Go back to Home
+  and open the plugin again: the same items are the first row again, as **Get N new ·
+  ... (2)**, and the web UI shows them as **waiting**.
+- [ ] C5c. **No second copy while the report is pending.** Fetch **Get 1 new**, press
+  **Back** once (to the plugin list) and open **Send to X3** again: the first row reads
+  **Nothing new right now** ("Your last fetch ... is confirmed the next time the X3
+  joins Wi-Fi"). Go back to Home and open it again: the web UI now shows `fetch`.
+- [ ] C6. On the X3: **Home > Library** has the new book (one new item: its own title;
+  several: `Inbox: 2 items (...)` with one chapter each). **Browse Files > Inbox** shows
+  the file `Get 2 new · Oct 26 14.05.epub`. Open it (see section F).
+- [ ] C6b. Back in the plugin, select a single item below the first row. **Download
+  complete**; the file in **Inbox** is named after the item's title and the web UI
+  shows `catalog` for it.
+- [ ] C6c. **Nothing arrives by itself.** Share a new item, then put the X3 to sleep
+  and wake it. No **Loading...** popup at sleep, and nothing new in **Inbox**; the item
+  still shows `waiting` until you use **Get 1 new**.
+
+The rest of section C is only for the optional delivery at sleep. First turn it on:
+Configuration tab, **Also deliver when the X3 sleeps** on, **Save**, restart the app,
+and reinstall the plugin (C2 and C3).
+
 - [ ] C7. **Sleep delivery on 2.0.0rc.** Share a new item (for example with B1). On
   the X3, open **Home > Plugins > Send to X3** (this joins Wi-Fi), then, from that
   screen, hold the power button to sleep. You should see the message **Send to X3: new
@@ -561,13 +585,12 @@ For an X3 on 2.0.0rc or a newer 2.x build.
   contains develop commit `facaa87` (2026-10-23 or later), this plain wake and sleep
   delivers it with no taps.
 - [ ] C9. **Turning sleep delivery off.** On the app's Configuration tab turn off
-  **Deliver when the X3 sleeps**, select **Save** and restart the app. Do **not**
+  **Also deliver when the X3 sleeps**, select **Save** and restart the app. Do **not**
   reinstall the plugin yet. Share a new item, then repeat C7 on the X3. No new
   delivery file appears in **Inbox**, and the item still shows `waiting`: the app
   refuses sleep delivery even for an X3 that still has the old plugin.
-- [ ] C10. Reinstall the plugin (C2 and C3). Download the waiting item from the
-  catalog (C4, C5): that still works. Then turn **Deliver when the X3 sleeps** back on,
-  save, restart and reinstall the plugin once more.
+- [ ] C10. Reinstall the plugin (C2 and C3). Fetch the waiting item with **Get 1 new**
+  (C4, C5): that still works. Leave delivery at sleep off unless you want it.
 
 Note: when the message appears in C7, and the rule that sleep delivery needs at
 least 20% battery and the Wi-Fi network the X3 last joined, come from reading the
@@ -597,12 +620,17 @@ For an X3 on 1.6.5 (it has no plugins). This also works on 2.x.
   Then save (**Save** on the Mac page).
 - [ ] D2. On the X3, in **OPDS Servers**, set **Download Folder** to `/Inbox` (the
   default is the SD card's top folder).
-- [ ] D3. On 1.6.5: **Home > OPDS Browser**. On 2.x: **Home > Plugins > OPDS
-  Browser**. The list shows your items, newest first, with a short origin (the site
-  or sender) as author.
-- [ ] D4. Select the newest entry (on 2.x, confirm on the page that opens). The book
-  downloads; in the web UI the item shows `opds`. **Browse Files > Inbox** has
-  `<origin> - <title>.epub` (just `<title>.epub` for long titles, so the name fits).
+- [ ] D3. Share one new item first. On 1.6.5: **Home > OPDS Browser**. On 2.x: **Home >
+  Plugins > OPDS Browser**. The first entry is **Get 1 new · <date time>** without an
+  author; below it your items, newest first, with a short origin (the site or sender)
+  as author.
+- [ ] D4. Select the newest single entry, the second one (on 2.x, confirm on the page
+  that opens). The book downloads; in the web UI the item shows `opds`. **Browse Files
+  > Inbox** has `<origin> - <title>.epub` (just `<title>.epub` for long titles, so the
+  name fits).
+- [ ] D4b. Share another item, open the feed again and select the first entry, **Get 1
+  new**. **Inbox** gets `Get 1 new · <date time>.epub` and the web UI shows `fetch` for
+  the item.
 - [ ] D5. Change the device token? Then update the password here too (and reinstall
   the plugin on 2.x).
 
@@ -732,5 +760,5 @@ personal address to send from.
 - [ ] L1. Delete test items with **Delete** on the queue page (files already on the X3
   stay there; delete them on the X3 with **Browse Files**).
 - [ ] L2. Put any options you changed back the way you want them, save and restart.
-- [ ] L3. If the X3 is on 2.0.0rc, consider a newer build or nightly with commit
-  `facaa87` for truly zero-tap delivery at sleep.
+- [ ] L3. If you use the optional delivery at sleep and the X3 is on 2.0.0rc, consider
+  a newer build or nightly with commit `facaa87`, where it needs no taps.

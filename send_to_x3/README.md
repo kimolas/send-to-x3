@@ -6,10 +6,9 @@ Share a web page, some text, an email or a PDF from your phone or computer, and
 read it on your Xteink X3 a moment later as clean, image-free text.
 
 - Works with **stock CrossPoint** firmware: 1.6.5 (OPDS and LAN push) and 2.x (an
-  SD-card plugin with an on-device catalog and automatic delivery). New items are
-  delivered when the X3 goes to sleep on your home Wi-Fi on builds newer than
-  2.0.0rc (with develop commit facaa87). On 2.0.0rc they arrive the next time the
-  X3 uses Wi-Fi: opening Home > Plugins > Send to X3, OPDS or File Transfer.
+  SD-card plugin). Nothing arrives by itself: on the X3 open Home > Plugins >
+  Send to X3 and select **Get 3 new** to download everything new as one book.
+  Delivery at sleep is available as an option.
 - Send from the **Home Assistant Companion app** share sheet, an **iPhone Shortcut**
   or Android HTTP shortcut, **email** (the app checks your mailbox), or the web UI.
 - Articles are extracted without ads, menus or images and turned into small EPUB

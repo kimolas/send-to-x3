@@ -59,8 +59,13 @@
 
 <section class="card">
   <h2>X3 with CrossPoint 2.x: the Send to X3 plugin</h2>
-  <p>Gives you a catalog of everything you shared (Home &gt; Plugins &gt; Send to X3){% if opts.auto_delivery %} and delivers
-     new reading automatically when the X3 goes to sleep on your home Wi-Fi{% endif %}.</p>
+  <p>{% if not opts.auto_delivery %}Nothing arrives on the X3 by itself. {% endif %}To get your reading, open Home &gt;
+     Plugins &gt; Send to X3 and press Confirm on the first row, <strong>Get 3 new</strong>: everything you shared since
+     the last fetch is saved as one book in <code>{{ opts.inbox_folder }}</code>. The rows below list everything you
+     shared, to download one at a time.{% if opts.auto_delivery %} New reading is also delivered automatically when
+     the X3 goes to sleep on your home Wi-Fi (option <code>auto_delivery</code>; the X3 then joins Wi-Fi at every
+     sleep).{% else %} The X3 confirms each saved download the next time it joins Wi-Fi (go back to Home, then open
+     Send to X3 again); until then the queue shows "sent, not confirmed yet".{% endif %}</p>
   {% if opts.auto_delivery %}
   <p class="muted">Delivery at sleep needs a CrossPoint build newer than 2.0.0rc (with the fix "Load WiFi settings from
      file before sleep mode", develop commit facaa87). On 2.0.0rc new items arrive the next time the X3 joins Wi-Fi
@@ -92,7 +97,8 @@
         and an <code>{{ opts.inbox_folder }}</code> folder. On a Mac, Finder hides folders starting with a dot; use
         <code>unzip -o sendtox3-sd-card.zip -d /Volumes/&lt;card&gt;</code> in Terminal.</li>
     <li>On the X3 turn on Settings &gt; Connectivity &gt; Plugins (it is off by default).</li>
-    <li>Open Home &gt; Plugins &gt; Send to X3.</li>
+    <li>Open Home &gt; Plugins &gt; Send to X3. Until you share something, its only row is <strong>Nothing new right
+        now</strong>; afterwards the first row, <strong>Get 1 new</strong>, downloads it.</li>
   </ol>
   <p class="muted">The bundle contains this server's address and the device token. Download it again if either changes.</p>
 </section>
@@ -108,7 +114,8 @@
         <tr><th>User name</th><td><code>x3</code></td></tr>
         <tr><th>Password</th><td>the device token above</td></tr>
       </table>
-      <p>Then open the OPDS browser on the X3 to download items (newest first).</p>
+      <p>Then open the OPDS browser on the X3. When something is new, the first entry, <strong>Get 3 new</strong>,
+         downloads all of it as one book; the other entries are single items, newest first.</p>
     </div>
   </div>
 </section>

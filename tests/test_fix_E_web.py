@@ -231,6 +231,7 @@ async def test_setup_warns_about_an_unusable_configured_device_token(aiohttp_cli
 
 
 async def test_setup_page_explains_sleep_delivery_on_2_0_0rc(client, app):
+    app[STATE_KEY].opts.auto_delivery = True
     await login(client)
     html = await (await client.get("/admin/setup")).text()
     assert "every time the X3 goes to sleep" not in html

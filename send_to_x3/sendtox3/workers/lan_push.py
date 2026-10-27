@@ -55,6 +55,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
+from .. import delivery
 from ..device_client import (
     DeviceClient,
     DeviceError,
@@ -268,7 +269,9 @@ class _Pusher:
         self.status.update(
             online=True, last_seen=int(time.time()), device_version=version, device=str(info.get("device", ""))
         )
-        pending = [i for i in self.state.store.pending_items() if i.id not in self.refused]
+        # Items the X3 already received in a "Get N new" and will confirm are not pushed again.
+        waiting = delivery.awaiting_confirmation(self.state.store)
+        pending = [i for i in self.state.store.pending_items() if i.id not in self.refused and i.id not in waiting]
         self.status["pending"] = len(pending)
         if pending:
             result = await push_items(self.client, self.state.store, pending, folder=self.folder, fmt=self.fmt)

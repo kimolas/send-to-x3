@@ -125,17 +125,18 @@ wrote (start line, headers, body size) and the files on the card. The SD folder
 
 | Id | Firmware | What it proves |
 |---|---|---|
-| S1 | 2.0.0rc | Home > Plugins > Send to X3 lists the catalog (page=1&limit=9, bearer token) and two fetches land `/Inbox/<title>.epub` byte-identical to what was served; an unsafe title (`Wait... what? A/B: …`) is made firmware-safe by the backend |
+| S1 | 2.0.0rc, 3f387a9 | Home > Plugins > Send to X3 lists the catalog (page=1&limit=9, bearer token) with **Get 2 new** first; Confirm lands `/Inbox/<row title>.epub` (one 2-chapter EPUB, fetched with `?confirm=1`) and queues `book.downloaded`; until the report the first row reads **Nothing new right now** (the bundle awaits it and is not offered again); after the restart, opening the plugin POSTs the saved path to `/device/v1/fetched` before the list loads, which counts the items; two single fetches land `/Inbox/<title>.epub` byte-identical to what was served; an unsafe title (`Wait... what? A/B: …`) is made firmware-safe by the backend |
 | S2 | 2.0.0rc, 3f387a9 | sleep.enter delivery: 200 -> `/Inbox/<ts>-<ev>.epub` (2-chapter digest); 404 -> nothing written, line kept; the next drain retries the same ev/ts and lands the new item |
 | S3 | 2.0.0rc, 1.6.5 | File Transfer > Join a Network starts the firmware's web server; the backend's LAN push finds it, makes sure `/Inbox` exists, uploads one file per item and writes `<title> (2).<ext>` next to an existing different file instead of failing; run with `delivery_format` epub (the app default) and txt |
-| S4 | 2.0.0rc, 1.6.5 | OPDS browse with HTTP Basic, download of the newest entry to `/Inbox/<author> - <title>.epub` |
+| S4 | 2.0.0rc, 1.6.5 | OPDS browse with HTTP Basic; the first entry, **Get 2 new** (no author), downloads as `/Inbox/<title>.epub`, one EPUB with both items, and no single entry is downloaded |
 | S5 | 2.0.0rc, 1.6.5 | The served EPUB and TXT open in the real reader; pages 1 and 2 render (screenshots) with no firmware errors |
-| W1 | 2.0.0rc, 3f387a9 | Wire harness: exact request bytes (headers, User-Agents), download, sleep delivery, 404 keeps the line, drain retries it |
+| W1 | 2.0.0rc, 3f387a9 | Wire harness: exact request bytes (headers, User-Agents), download, the **Get 1 new** row, sleep delivery (with `auto_delivery` on), 404 keeps the line, drain retries it; with the default plugin, a download queues `book.downloaded` and the drain POSTs the saved path to `/device/v1/fetched`, which only then marks the item |
 
 Backends (`scenarios/backends.py`, `--backend`):
 
 - `mock`: `e2e/mock_backend.py`, a standard-library stand-in implementing the §7
-  device contract (ingest, catalog paging, item downloads, idempotent `/deliver`, OPDS
+  device contract (ingest, catalog paging with the **Get N new** row, item and bundle
+  downloads with `?confirm=1` and `POST /device/v1/fetched`, idempotent `/deliver`, OPDS
   with Basic, LAN push worker). `--empty-deliver-status 204` reproduces the
   empty-file regression on purpose.
 - `local`: `python -m sendtox3` with a temp `SENDTOX3_DATA_DIR`, an `options.json`

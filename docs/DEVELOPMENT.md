@@ -74,7 +74,7 @@ Everything lives in `send_to_x3/sendtox3/`. Section numbers refer to
 | `textmodel.py` | The format-neutral `Document` and its blocks, `clean_text`, font coverage (§5) | `test_render_*.py` |
 | `store.py` | SQLite queue and rendered files under the data folder (owner-only permissions), secrets, delivery records, the spool of shares being processed, titles already used on the X3, retention (§4) | `test_store.py`, `test_fix_A_store.py`, `test_fix2_A_store.py` |
 | `ingest.py` | `Processor`: classifies a share, removes duplicates, extracts, titles, renders and stores it; raises only `StorageError` (any other failure becomes an item with status `failed`); processing budgets; the spool and redoing shares interrupted by a restart (§7.1) | `test_ingest.py`, `test_fix_A_ingest.py`, `test_fix2_A_ingest.py` |
-| `delivery.py` | Sleep-time auto-delivery (digest, byte-identical replay, the "too large" note) and the plugin catalog pages (§7.2) | `test_delivery.py`, `test_fix_A_delivery.py` |
+| `delivery.py` | The "Get N new" bundle (the catalog's first row and first OPDS entry), sleep-time auto-delivery (digest, byte-identical replay, the "too large" note) and the plugin catalog pages (§7.2) | `test_fetch_bundle.py`, `test_delivery.py`, `test_fix_A_delivery.py` |
 | `device_client.py` | Client for the X3's File Transfer web server (stock firmware) | `test_device_client.py` |
 | `plugin_bundle.py` | The CrossPoint 2.x plugin: `device.json`, the SD-card zip, installing it over Wi-Fi, detecting and checking the server address, checking the device token (§10) | `test_plugin_bundle.py` |
 | `phone.py` | The Android HTTP Shortcuts import file (the Setup page's download and `shortcuts/build_android.py` use it) and the iOS note on the Setup page | `test_phone.py` |
@@ -88,7 +88,7 @@ Everything lives in `send_to_x3/sendtox3/`. Section numbers refer to
 | `web/app.py` | aiohttp application factory: routes, response framing rules, error handling, access log | `test_web_*.py` |
 | `web/common.py` | Shared web pieces: token checks (constant time), framing-safe responses | `test_web_*.py` |
 | `web/ingest_api.py` | `POST /api/v1/ingest`, the share endpoint (§7.1) | `test_web_ingest.py` |
-| `web/device_api.py` | `/device/v1/catalog`, `/device/v1/items/<id>.epub` and `.txt`, `/device/v1/deliver` for the 2.x plugin | `test_web_device.py` |
+| `web/device_api.py` | `/device/v1/catalog`, `/device/v1/items/<id>.epub` and `.txt` (also `all-<key>` bundles and `none`), `POST /device/v1/fetched` (the X3 confirms a saved bundle), `/device/v1/deliver` for the 2.x plugin | `test_web_device.py`, `test_fetch_bundle.py` |
 | `web/opds.py` | `/opds` feed and `/opds/items/<id>.epub` for 1.6.5 and later (§7.3) | `test_opds.py` |
 | `web/admin.py`, `web/templates/`, `web/static/` | The admin web UI: queue, previews, paste and upload, channel health, tokens and **New device token**, Setup page, plugin bundle and install, the Android import file | `test_web_admin.py` |
 | `workers/imap.py` | Email ingest: IMAP IDLE (or polling), acceptance filter, marking read and moving, the per-message attempt counter | `test_imap_worker.py`, `test_imap_greenmail.py` |
@@ -101,7 +101,7 @@ Everything lives in `send_to_x3/sendtox3/`. Section numbers refer to
 |---|---|---|
 | `GET /healthz` | Home Assistant's watchdog, you | none |
 | `POST /api/v1/ingest` | phone shortcuts, scripts | `Authorization: Bearer <ingest token>` or `?token=` |
-| `GET /device/v1/catalog`, `/device/v1/items/<id>.epub`, `/device/v1/items/<id>.txt`, `/device/v1/deliver` | the 2.x plugin | `Authorization: Bearer <device token>` |
+| `GET /device/v1/catalog`, `/device/v1/items/<id>.epub`, `/device/v1/items/<id>.txt`, `/device/v1/deliver`, `POST /device/v1/fetched` | the 2.x plugin | `Authorization: Bearer <device token>` |
 | `GET /opds`, `/opds/items/<id>.epub` | the OPDS browser | HTTP Basic, user `x3`, password = device token |
 | `/admin` and below | you, in a browser | Home Assistant ingress, or the admin token on the LAN |
 
@@ -115,9 +115,9 @@ Everything lives in `send_to_x3/sendtox3/`. Section numbers refer to
    file), fetches and extracts the article (`extract/`), picks a firmware-safe title
    (`render/names.py`) and the headline for the book, renders the EPUB and TXT
    (`render/`), stores one or more `Item`s (`store.py`) and removes the spool entry.
-3. The X3 receives it through one of four channels: the 2.x plugin catalog
-   (`web/device_api.py`), sleep delivery (`delivery.py`), OPDS (`web/opds.py`) or LAN
-   push (`workers/lan_push.py`). Each records the delivery on the item, so the admin
+3. The X3 receives it when the user asks: the 2.x plugin catalog's first row, "Get N
+   new", or a single row (`web/device_api.py`, `delivery.py`), or OPDS (`web/opds.py`);
+   or, if turned on, sleep delivery (`delivery.py`) or LAN push (`workers/lan_push.py`). Each records the delivery on the item, so the admin
    page shows where it went.
 
 ## Run the app on your Mac

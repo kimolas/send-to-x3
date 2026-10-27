@@ -165,28 +165,37 @@ def _ids(page):
     return [row["id"] for row in page["items"]]
 
 
+def _rows(store) -> list[str]:
+    """The catalog as the device pages through it: the "Get N new" row, then items."""
+    return [catalog_page(store, 1, 2)["items"][0]["id"]] + [it.id for it in store.list_items(limit=1000)]
+
+
 def test_nine_items_page_size_eight(store):
-    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(9)]
-    newest_first = [it.id for it in reversed(items)]
+    for i in range(8):
+        add_item(store, f"Item {i}", created_at=1000 + i)
+    rows = _rows(store)
+    assert rows[0].startswith("all-") and len(rows) == 9
     p1 = catalog_page(store, 1, 9)  # firmware sends limit = page_size + 1
-    assert _ids(p1) == newest_first[:9]  # 8 shown + 1 extra -> the device adds "Next Page"
+    assert _ids(p1) == rows[:9]  # "Get N new" + 7 items shown, 1 extra -> the device adds "Next Page"
     p2 = catalog_page(store, 2, 9)
-    assert _ids(p2) == newest_first[8:]  # offset (2-1)*(9-1) = 8
+    assert _ids(p2) == rows[8:]  # offset (2-1)*(9-1) = 8
     assert len(p2["items"]) == 1
 
 
-def test_eight_items_has_no_extra_row(store):
-    for i in range(8):
+def test_seven_items_has_no_extra_row(store):
+    for i in range(7):
         add_item(store, f"Item {i}", created_at=1000 + i)
-    assert len(catalog_page(store, 1, 9)["items"]) == 8
+    assert len(catalog_page(store, 1, 9)["items"]) == 8  # "Get N new" + 7: no "Next Page"
 
 
-@pytest.mark.parametrize("page,limit,start,count", [(1, 9, 0, 9), (2, 9, 8, 9), (3, 9, 16, 4), (4, 9, 24, 0),
-                                                    (1, 2, 0, 2), (5, 2, 4, 2), (2, 17, 16, 4)])
+@pytest.mark.parametrize("page,limit,start,count", [(1, 9, 0, 9), (2, 9, 8, 9), (3, 9, 16, 5), (4, 9, 24, 0),
+                                                    (1, 2, 0, 2), (5, 2, 4, 2), (2, 17, 16, 5)])
 def test_exact_offsets(store, page, limit, start, count):
-    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(20)]
-    newest_first = [it.id for it in reversed(items)]
-    assert _ids(catalog_page(store, page, limit)) == newest_first[start:start + count]
+    for i in range(20):
+        add_item(store, f"Item {i}", created_at=1000 + i)
+    rows = _rows(store)
+    assert len(rows) == 21
+    assert _ids(catalog_page(store, page, limit)) == rows[start:start + count]
 
 
 def test_paging_is_clamped(store):

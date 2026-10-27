@@ -82,8 +82,8 @@ def processor(store, opts):
 
 
 @pytest.fixture
-async def client(aiohttp_client, opts, store, processor):
-    return await aiohttp_client(create_app(opts, store, processor))
+async def client(serve_like_main, opts, store, processor):
+    return await serve_like_main(create_app(opts, store, processor))
 
 
 def validate_epub(data: bytes) -> dict[str, bytes]:
@@ -119,7 +119,8 @@ async def _ingest(client, **kw):
     return data
 
 
-async def test_share_catalog_deliver_opds(client, site, store):
+async def test_share_catalog_deliver_opds(client, site, store, opts):
+    opts.auto_delivery = True  # the sleep delivery part below
     url = str(site.make_url("/article"))
     shared = await _ingest(client, json={"url": url})
     assert shared["status"] == "ready", shared
@@ -136,10 +137,12 @@ async def test_share_catalog_deliver_opds(client, site, store):
                          headers={**INGEST, "Content-Type": "text/plain; charset=utf-8"})
     assert note["status"] == "ready" and store.get(note["id"]).kind == "text"
 
-    # Catalog: newest first, mapped fields only, firmware paging (limit = page_size + 1).
+    # Catalog: "Get 2 new" first, then newest first, mapped fields only, firmware paging
+    # (limit = page_size + 1).
     rows = (await (await client.get("/device/v1/catalog?page=1&limit=9", headers=DEVICE)).json())["items"]
-    assert [r["id"] for r in rows] == [note["id"], shared["id"]]
-    assert rows[1]["subtitle"].startswith("New · ") and "127.0.0.1" in rows[1]["subtitle"]
+    assert rows[0]["id"].startswith("all-") and rows[0]["title"].startswith("Get 2 new · ")
+    assert [r["id"] for r in rows[1:]] == [note["id"], shared["id"]]
+    assert rows[2]["subtitle"].startswith("New · ") and "127.0.0.1" in rows[2]["subtitle"]
 
     # Sleep delivery: one digest of both, oldest first; replay is byte-identical; then 404.
     deliver = "/device/v1/deliver?ev=0a1b2c3d-1&ts=1761400000"
@@ -157,7 +160,10 @@ async def test_share_catalog_deliver_opds(client, site, store):
     dl = await client.get(f"/device/v1/items/{shared['id']}.epub", headers=DEVICE)
     assert dl.status == 200 and await dl.read() == epub
     rows = (await (await client.get("/device/v1/catalog?page=1&limit=9", headers=DEVICE)).json())["items"]
-    assert rows[1]["subtitle"].startswith("Read on X3 ")
+    assert rows[2]["subtitle"].startswith("Read on X3 ")
+    # Nothing new: the first row says so, and fetching it is a 404 that writes nothing.
+    assert rows[0]["id"] == "none" and rows[0]["title"] == "Nothing new right now"
+    assert (await client.get("/device/v1/items/none.epub", headers=DEVICE)).status == 404
 
     # OPDS for 1.6.5.
     feed = await client.get("/opds", headers=OPDS)
@@ -168,6 +174,23 @@ async def test_share_catalog_deliver_opds(client, site, store):
     got = await client.get(f"/opds/items/{item.id}.epub", headers=OPDS)
     assert await got.read() == epub and "opds" in store.get(item.id).delivered
 
+    # Something new again: "Get 1 new" in the catalog and as the first OPDS entry.
+    later = await _ingest(client, data=b"One more note to read later.", headers={**INGEST, "Content-Type": "text/plain"})
+    rows = (await (await client.get("/device/v1/catalog?page=1&limit=9", headers=DEVICE)).json())["items"]
+    assert rows[0]["title"].startswith("Get 1 new · ") and rows[1]["id"] == later["id"]
+    root = etree.fromstring(await (await client.get("/opds", headers=OPDS)).read())
+    first = root.findall("a:entry", ns)[0]
+    assert first.findtext("a:title", namespaces=ns) == rows[0]["title"]
+    href = first.find("a:link", ns).get("href")
+    assert href == f"/opds/items/{rows[0]['id']}.epub"
+    got = await client.get(href, headers=OPDS)
+    assert got.status == 200 and await got.read() == store.file_bytes(later["id"], "epub")
+    for _ in range(150):  # marked once the client's TCP stack acknowledged every byte
+        if "fetch" in store.get(later["id"]).delivered:
+            break
+        await asyncio.sleep(0.02)
+    assert "fetch" in store.get(later["id"]).delivered
+
     if os.environ.get("SENDTOX3_FIRMWARE_TESTS") == "1":
         harness = Path(os.environ.get("SENDTOX3_OPDS_HARNESS") or os.path.join(
             os.environ.get("FWH_WORK") or os.path.join(tempfile.gettempdir(), "sendtox3-fwharness"), "opds", "opds_check"))
@@ -176,7 +199,9 @@ async def test_share_catalog_deliver_opds(client, site, store):
             path.write_bytes(etree.tostring(root, xml_declaration=True, encoding="UTF-8"))
             out = subprocess.run([str(harness), str(path), "http://192.168.1.50:8765/opds"], capture_output=True,
                                  text=True, timeout=30)
-            assert "RESULT: OK (2 rows)" in out.stdout, out.stdout
+            # The latest feed: "Get 1 new" (a book to the firmware too) plus the three items.
+            assert "RESULT: OK (4 rows)" in out.stdout, out.stdout
+            assert f'[BOOK] title="{rows[0]["title"]}" author=""' in out.stdout, out.stdout
 
 
 async def test_duplicate_share_returns_existing(client, site):
@@ -215,7 +240,7 @@ async def test_unsafe_title_is_firmware_safe(client, store):
     title = data["title"]
     assert ".." not in title and "{" not in title and "/" not in title and "~1" not in title
     rows = (await (await client.get("/device/v1/catalog?page=1&limit=9", headers=DEVICE)).json())["items"]
-    assert rows[0]["title"] == title
+    assert rows[1]["title"] == title and rows[0]["title"].startswith("Get 1 new · ")
 
 
 async def test_email_requests_become_items(processor, store):

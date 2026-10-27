@@ -30,7 +30,7 @@ from urllib.parse import parse_qsl, quote
 import jinja2
 from aiohttp import web
 
-from .. import __version__, plugin_bundle
+from .. import __version__, delivery, plugin_bundle
 from ..app_state import CHANNEL_LABELS, AppState, rotate_secret
 from ..ingest import StorageError
 from ..models import IngestRequest
@@ -403,6 +403,7 @@ async def queue_view(request: web.Request, ctx: AdminContext, *, flash: str = ""
     pending = len(state.store.pending_items())
     return render(request, ctx, "index.html", status=status, flash=flash, flash_kind=flash_kind,
                   items=items, page=page, pages=pages, total=total, pending=pending,
+                  unconfirmed=delivery.unconfirmed_fetches(state.store),
                   channels=channel_rows(state), warnings=delivery_warnings(state),
                   deliveries=state.store.delivery_stats()[:5], max_upload_mb=MAX_INGEST_BYTES // (1024 * 1024))
 
@@ -464,7 +465,8 @@ async def item_view(request: web.Request, ctx: AdminContext) -> web.Response:
         except FileNotFoundError:
             sizes[fmt] = 0
     truncated = len(preview) > 200_000
-    return render(request, ctx, "item.html", item=item, preview=preview[:200_000], truncated=truncated, sizes=sizes)
+    return render(request, ctx, "item.html", item=item, preview=preview[:200_000], truncated=truncated, sizes=sizes,
+                  unconfirmed=delivery.unconfirmed_fetches(state.store))
 
 
 @_admin_handler
@@ -505,7 +507,7 @@ async def item_requeue(request: web.Request, ctx: AdminContext, form: Any) -> we
     item = state.store.get(request.match_info["item_id"])
     if item is None:
         return await queue_view(request, ctx, flash="That item no longer exists.", flash_kind="error")
-    state.store.requeue(item.id)
+    delivery.requeue(state.store, item.id)
     return await queue_view(request, ctx, flash=f"“{item.title}” will be delivered again.", flash_kind="ok")
 
 

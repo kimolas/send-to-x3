@@ -11,8 +11,8 @@ the reader is modified, and nothing needs to be reachable from the internet.
  Phone / computer                     Raspberry Pi (Home Assistant OS)        Xteink X3 (stock CrossPoint)
  ----------------                     --------------------------------        ----------------------------
  iPhone shortcut ------ home Wi-Fi --->+---------------------------+
- Android HTTP Shortcuts -------------->|       Send to X3 app      |<-- 2.x plugin: catalog, and
- Home Assistant Companion share ------>|                           |    delivery when the X3 sleeps
+ Android HTTP Shortcuts -------------->|       Send to X3 app      |<-- 2.x plugin: "Get 3 new"
+ Home Assistant Companion share ------>|                           |    and a catalog, on request
  Web UI: paste text or upload a file ->|  fetch the article or PDF |<-- 1.6.5+: OPDS Browser
  Email, from anywhere --> Gmail <------|  -> clean text EPUB / TXT |--> any: LAN push while the
                          (the app checks the mailbox)              |    File Transfer screen is open
@@ -35,9 +35,12 @@ the reader is modified, and nothing needs to be reachable from the internet.
   and/or your allowed senders, and leaves every mail it does not accept unread.
 - **Reads well on the X3:** small, valid EPUB files with proper titles (plain `.txt`
   if you prefer), with file names the firmware accepts.
-- **Four ways onto the X3:** the CrossPoint 2.x plugin (an on-device catalog plus
-  automatic delivery when the X3 goes to sleep; on 2.0.0rc at the next Wi-Fi use, see
-  below), the OPDS feed for CrossPoint 1.6.5 and later, and LAN push to the X3's File
+- **You decide when it arrives:** on the X3 open **Home > Plugins > Send to X3** and
+  press **Confirm** on the first row, **Get 3 new**: everything shared since last time
+  arrives as one book. Nothing is downloaded by itself.
+- **Ways onto the X3:** the CrossPoint 2.x plugin (**Get 3 new**, a catalog of
+  everything shared, and optional delivery at sleep), the OPDS feed for CrossPoint
+  1.6.5 and later (with the same **Get 3 new** entry), and LAN push to the X3's File
   Transfer screen.
 - **A web UI in Home Assistant:** the reading queue, previews, delivery status,
   requeue and delete, a paste and upload form, setup steps with QR codes, and a
@@ -58,10 +61,10 @@ right.
 
 Good to know before you choose:
 
-- **2.x** gives you a catalog on the X3 and delivery at sleep. On **2.0.0rc** (a
-  prerelease from 2026-10-19) the delivery at sleep only happens once Wi-Fi has been
-  used since the X3 last woke up; a newer build that includes the fix (develop commit
-  `facaa87`, 2026-10-23) delivers with no taps at all.
+- **2.x** gives you the Send to X3 plugin: **Get 3 new** fetches everything new in one
+  press, and the list below it has every item. Delivery at sleep is optional (on
+  **2.0.0rc**, a prerelease from 2026-10-19, it only happens once Wi-Fi has been used
+  since the X3 last woke up; develop commit `facaa87`, 2026-10-23, fixes that).
 - **1.6.5** (stable) has no plugins: you pick items in the X3's OPDS Browser, and/or
   new items are copied whenever the X3's File Transfer screen is open. Staying on 1.6.5
   is fine.
@@ -77,7 +80,7 @@ Good to know before you choose:
 | Read | For |
 |---|---|
 | [Setup guide](docs/SETUP.md) | Everything, step by step: network, firmware, installing the app, the X3, email, phones, final check |
-| [Using Send to X3](docs/USING.md) | Daily use: what to share, how it looks, catalog vs delivery at sleep vs OPDS vs push, PDFs, deleting and requeueing |
+| [Using Send to X3](docs/USING.md) | Daily use: what to share, how it looks, Get 3 new vs catalog vs OPDS vs push vs delivery at sleep, PDFs, deleting and requeueing |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Symptom, cause and fix tables, and how to collect logs |
 | [Security](docs/SECURITY.md) | What is exposed on your network, the email rules, recommendations |
 | [iPhone and iPad](docs/phone-ios.md) | The Send to X3 shortcut, the Companion app, email |

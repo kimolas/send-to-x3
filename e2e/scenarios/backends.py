@@ -153,7 +153,7 @@ class Backend:
         """Backend-side view (mock only); None when the backend has no such endpoint."""
         return None
 
-    def bundle_zip(self, *, delivery_format: Optional[str] = None, auto_delivery: bool = True,
+    def bundle_zip(self, *, delivery_format: Optional[str] = None, auto_delivery: bool = False,
                    source: str = "auto") -> bytes:
         """The SD plugin bundle pointing at ``public_url``.
 
@@ -186,7 +186,7 @@ class MockBackend(Backend):
         c = self.cfg
         argv = [c.python, "-I", str(REPO / "e2e" / "mock_backend.py"), "--port", str(c.port),
                 "--ingest-token", self.ingest_token, "--device-token", self.device_token,
-                "--empty-deliver-status", str(c.empty_deliver_status)]
+                "--empty-deliver-status", str(c.empty_deliver_status), "--catalog-format", c.delivery_format]
         if c.log_path:
             argv += ["--log", str(c.log_path)]
         if c.device_host:

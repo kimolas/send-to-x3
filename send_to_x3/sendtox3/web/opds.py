@@ -12,21 +12,28 @@ CrossPoint's OPDS client (research report u-opds.md, OpdsParser.cpp):
 - Titles are not trimmed (no whitespace around them) and become ``Author - Title.epub``
   cut to 100 bytes, so the author is omitted when it would push the title out.
 - expat without DTD entities: only the five XML escapes are used.
+
+The first entry of page 1 is "Get N new" (everything never delivered, as one EPUB) when
+anything is new; there is no "Nothing new" entry, because every OPDS entry is a book.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
-from typing import Iterable
+from typing import Iterable, Optional
 
 from aiohttp import web
 from lxml import etree
 
 from ..models import Item
 from .. import delivery
-from .common import basic_password, bearer_token, bytes_response, get_state, json_error, parse_int, tokens_equal
+from .common import (basic_password, bearer_token, bytes_response, get_state, json_error, parse_int, send_whole,
+                     tokens_equal)
+
+log = logging.getLogger(__name__)
 
 ATOM_NS = "http://www.w3.org/2005/Atom"
 ACQUISITION_FEED = "application/atom+xml;profile=opds-catalog;kind=acquisition"
@@ -79,8 +86,10 @@ def _page_href(page: int) -> str:
     return "/opds" if page <= 1 else f"/opds?page={page}"
 
 
-def build_feed(items: Iterable[Item], *, page: int, has_next: bool, now: int | None = None) -> bytes:
-    """Serialize one page of the feed (UTF-8, no pretty-printing inside text nodes)."""
+def build_feed(items: Iterable[Item], *, page: int, has_next: bool, now: int | None = None,
+               fetch: Optional[delivery.FetchBundle] = None) -> bytes:
+    """Serialize one page of the feed (UTF-8, no pretty-printing inside text nodes);
+    ``fetch`` becomes the first entry."""
     items = list(items)
     now = int(now or time.time())
     updated = max([it.created_at for it in items], default=now)
@@ -103,6 +112,13 @@ def build_feed(items: Iterable[Item], *, page: int, has_next: bool, now: int | N
         sub(feed, "link", rel="previous", type=ACQUISITION_FEED, href=_page_href(page - 1))
     if has_next:
         sub(feed, "link", rel="next", type=ACQUISITION_FEED, href=_page_href(page + 1))
+    if fetch is not None:
+        entry = sub(feed, "entry")
+        sub(entry, "title", entry_title(fetch.title))
+        sub(entry, "id", f"urn:sendtox3:{fetch.id}")
+        sub(entry, "updated", _iso(updated))
+        sub(entry, "summary", _xml_text(fetch.subtitle), type="text")
+        sub(entry, "link", rel=ACQUISITION_REL, type=EPUB_TYPE, href=f"/opds/items/{fetch.id}.epub")
     for it in items:
         entry = sub(feed, "entry")
         title = entry_title(it.title)
@@ -137,7 +153,13 @@ async def feed(request: web.Request) -> web.Response:
     state = get_state(request)
     page = max(1, parse_int(request.query.get("page"), 1))
     rows = state.store.list_items(offset=(page - 1) * PAGE_SIZE, limit=PAGE_SIZE + 1, newest_first=True)
-    body = build_feed(rows[:PAGE_SIZE], page=page, has_next=len(rows) > PAGE_SIZE)
+    fetch = None
+    if page == 1:
+        try:
+            fetch = await asyncio.to_thread(delivery.build_fetch_bundle, state.store, "epub")
+        except Exception:  # noqa: BLE001 - the items are still listed
+            log.exception("could not prepare the \"Get N new\" entry")
+    body = build_feed(rows[:PAGE_SIZE], page=page, has_next=len(rows) > PAGE_SIZE, fetch=fetch)
     state.set_status("opds", "ok", f"feed page {page}")
     return bytes_response(body, FEED_CONTENT_TYPE)
 
@@ -159,7 +181,23 @@ async def download(request: web.Request) -> web.Response:
     return bytes_response(data, EPUB_TYPE)
 
 
+async def fetch_download(request: web.Request) -> web.StreamResponse:
+    if not _authorized(request):
+        return _unauthorized()
+    state = get_state(request)
+    bundle = await asyncio.to_thread(delivery.fetch_lookup, state.store, request.match_info["bundle_id"], "epub")
+    if bundle is None:
+        return json_error(404, "nothing new: open the feed again")
+    resp, whole = await send_whole(request, bundle.data, EPUB_TYPE)
+    # OPDS cannot confirm saved files: the items count once the X3 received all of it.
+    await asyncio.to_thread(delivery.fetch_sent, state.store, bundle, complete=whole)
+    if whole:
+        state.set_status("opds", "ok", f"sent {bundle.title!r} ({len(bundle.data):,} bytes)")
+    return resp
+
+
 def add_routes(app: web.Application) -> None:
     app.router.add_get("/opds", feed, allow_head=False)
     app.router.add_get("/opds/", feed, allow_head=False)
     app.router.add_get("/opds/items/{item_id:[a-z2-7]{10}}.epub", download, allow_head=False)
+    app.router.add_get(f"/opds/items/{{bundle_id:{delivery.FETCH_ID_RE}}}.epub", fetch_download, allow_head=False)

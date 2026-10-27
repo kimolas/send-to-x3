@@ -28,6 +28,39 @@ TOKEN = "device-test-token"
 
 
 def test_device_json_matches_spec_exactly(opts):
+    """§10. By default (auto_delivery off) the only event is ``book.downloaded``, which
+    reports saved files and never joins Wi-Fi by itself (no ``connect``); downloads carry
+    ``?confirm=1``. With auto_delivery the event is ``sleep.enter`` and there is no confirm."""
+    assert build_device_json(base_url=BASE, device_token=TOKEN, opts=opts) == {
+        "title": "Send to X3",
+        "description": "Articles and notes you shared",
+        "browse": {
+            "format": "json",
+            "url": "http://192.168.1.50:8765/device/v1/catalog?page={page}&limit={limit}",
+            "headers": {"Authorization": "Bearer device-test-token"},
+            "items": "items",
+            "fields": {"title": "title", "author": "subtitle", "id": "id"},
+            "page_size": 8,
+        },
+        "download": {
+            "url": "http://192.168.1.50:8765/device/v1/items/{id}.epub?confirm=1",
+            "headers": {"Authorization": "Bearer device-test-token"},
+            "dest_dir": "/Inbox",
+            "filename": "{title}.epub",
+        },
+        "events": {
+            "book.downloaded": {
+                "request": {
+                    "url": "http://192.168.1.50:8765/device/v1/fetched?plugin={event.plugin}",
+                    "method": "POST",
+                    "headers": {"Authorization": "Bearer device-test-token",
+                                "Content-Type": "text/plain; charset=utf-8"},
+                    "body": "{event.path}",
+                },
+            }
+        },
+    }
+    opts.auto_delivery = True
     assert build_device_json(base_url=BASE, device_token=TOKEN, opts=opts) == {
         "title": "Send to X3",
         "description": "Articles and notes you shared",
@@ -58,12 +91,14 @@ def test_device_json_matches_spec_exactly(opts):
     }
 
 
-def test_auto_delivery_off_removes_events(opts):
+def test_auto_delivery_off_has_no_sleep_event(opts):
     opts.auto_delivery = False
-    assert "events" not in build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)
+    events = build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)["events"]
+    assert list(events) == ["book.downloaded"] and "connect" not in events["book.downloaded"]
 
 
 def test_txt_delivery_format(opts):
+    opts.auto_delivery = True
     opts.delivery_format = "txt"
     dj = build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)
     assert dj["download"]["url"].endswith("/device/v1/items/{id}.txt") and dj["download"]["filename"] == "{title}.txt"
@@ -73,6 +108,7 @@ def test_txt_delivery_format(opts):
 
 
 def test_custom_inbox_folder(opts):
+    opts.auto_delivery = True
     opts.inbox_folder = "Reading/Shared/"
     dj = build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)
     assert dj["download"]["dest_dir"] == "/Reading/Shared"
@@ -82,6 +118,7 @@ def test_custom_inbox_folder(opts):
 
 
 def test_strict_json_and_size(opts):
+    opts.auto_delivery = True
     data = device_json_bytes(base_url=BASE, device_token=TOKEN, opts=opts)
     assert len(data) <= 8192
     text = data.decode("utf-8")
@@ -135,6 +172,12 @@ def test_bundle_zip_layout(opts):
         readme = z.read(".crosspoint/plugins/sendtox3/README.md").decode()
         assert BASE in readme and TOKEN not in readme
         assert z.read("Inbox/.keep") == b""
+        # An empty event queue replaces an older plugin's (unzip -o overwrites it).
+        assert z.read(".crosspoint/plugins/sendtox3/events.jsonl") == b""
+        assert "Receives: downloads" in readme and "A cancelled" in readme
+    opts.auto_delivery = True
+    readme = plugin_bundle.readme_bytes(base_url=BASE, opts=opts).decode()
+    assert "Receives: downloads" not in readme  # no confirmation with sleep delivery
     assert len(PLUGIN_NAME.encode()) <= 23 and PLUGIN_DIR == "/.crosspoint/plugins/sendtox3"
 
 
@@ -339,13 +382,16 @@ async def test_install_with_real_device_client(aiohttp_server, opts, plugins_on)
     sd: dict = {}
     server = await aiohttp_server(_fake_crosspoint(sd, plugins_on=plugins_on))
     host = f"127.0.0.1:{server.port}"
+    # A 0.1.0 plugin's queue of sleep.enter lines: it must go, or it would hold back the
+    # download reports (4 events per Wi-Fi join).
+    sd["files"][f"{PLUGIN_DIR}/events.jsonl"] = b'{"e":"sleep.enter","id":"a-1","ts":1}\n' * 50
     for attempt in range(2):  # a second install must replace the files, not add "device (2).json"
         opts.auto_delivery = attempt == 0
         lines = await install_to_device(host, base_url=BASE, device_token=TOKEN, opts=opts)
         assert lines[-1].startswith("Done"), lines
         assert ("Plugins is off" in lines[-1]) == (not plugins_on)
         dj = json.loads(sd["files"][f"{PLUGIN_DIR}/device.json"])
-        assert ("events" in dj) == (attempt == 0)
+        assert ("sleep.enter" in dj["events"]) == (attempt == 0)
     assert sorted(k for k in sd["files"]) == sorted(f"{PLUGIN_DIR}/{n}" for n in ("README.md", "device.json",
                                                                                  "manifest.json"))
     assert "/Inbox" in sd["dirs"]

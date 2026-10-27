@@ -113,8 +113,23 @@ def _inbox(opts: Options) -> str:
     return folder
 
 
+#: Where the plugin reports files it saved (its ``book.downloaded`` event), so a "Get N
+#: new" bundle counts as delivered only once it is really on the SD card.
+CONFIRM_PATH = "/device/v1/fetched"
+#: The plugin's event queue on the X3 (PluginEvents.cpp outboxPath).
+OUTBOX_PATH = f"{PLUGIN_DIR}/events.jsonl"
+
+
 def build_device_json(*, base_url: str, device_token: str, opts: Options) -> dict:
-    """The plugin manifest exactly as in §10 (``events`` only with ``auto_delivery``)."""
+    """The plugin manifest exactly as in §10.
+
+    Default (``auto_delivery`` off): downloads carry ``?confirm=1`` and a
+    ``book.downloaded`` request reports each saved file; no event joins Wi-Fi by itself
+    (only ``sleep.enter`` does), so the report goes out the next time the X3 uses Wi-Fi,
+    which for the plugin is before its list loads. With ``auto_delivery`` the events are
+    ``sleep.enter`` only: its "nothing new" answers keep its line queued, which would hold
+    back the reports queued behind it, so downloads are marked as they are sent instead.
+    """
     base = normalize_base_url(base_url)
     token = _check_token(device_token)
     inbox = _inbox(opts)
@@ -132,7 +147,7 @@ def build_device_json(*, base_url: str, device_token: str, opts: Options) -> dic
             "page_size": 8,
         },
         "download": {
-            "url": f"{base}/device/v1/items/{{id}}.{fmt}",
+            "url": f"{base}/device/v1/items/{{id}}.{fmt}" + ("" if opts.auto_delivery else "?confirm=1"),
             "headers": {"Authorization": auth},
             "dest_dir": inbox,
             "filename": f"{{title}}.{fmt}",
@@ -147,6 +162,18 @@ def build_device_json(*, base_url: str, device_token: str, opts: Options) -> dic
                     "dest": f"{inbox}/{{event.ts}}-{{event.id}}.epub",
                 },
                 "toast": DELIVERY_TOAST,
+            }
+        }
+    else:
+        doc["events"] = {
+            "book.downloaded": {
+                "request": {
+                    # {event.plugin}: every plugin's catalog downloads fire this event.
+                    "url": f"{base}{CONFIRM_PATH}?plugin={{event.plugin}}",
+                    "method": "POST",
+                    "headers": {"Authorization": auth, "Content-Type": "text/plain; charset=utf-8"},
+                    "body": "{event.path}",
+                },
             }
         }
     return doc
@@ -173,7 +200,14 @@ def readme_bytes(*, base_url: str, opts: Options) -> bytes:
         f"  EPUB into {inbox} (a short \"Loading\" popup, then the toast \"{DELIVERY_TOAST}\").\n"
         f"  {SLEEP_DELIVERY_CAVEAT}\n"
         if opts.auto_delivery
-        else "- Automatic delivery at sleep is turned off (option auto_delivery).\n"
+        else "- Nothing is downloaded by itself (delivery at sleep, option auto_delivery, is off).\n"
+    )
+    confirm = (
+        "" if opts.auto_delivery else
+        " The X3 tells the app which files it saved\n"
+        "  the next time it joins Wi-Fi (after you go back to Home and open Send to X3\n"
+        "  again), which is why Home > Plugins says \"Receives: downloads\". A cancelled\n"
+        "  download is offered again."
     )
     text = f"""# Send to X3
 
@@ -183,14 +217,17 @@ Assistant at {normalize_base_url(base_url)}.
 ## Use it
 
 - Turn on {PLUGINS_SWITCH} on the X3 (it is off by default).
-- Home > Plugins > Send to X3 lists what you shared, newest first. Select an entry to
-  download it into {inbox}. The subtitle says whether the X3 already received it.
+- Home > Plugins > Send to X3, then Confirm on the first row, "Get 3 new": everything
+  shared since the last fetch is saved as one book into {inbox}. With nothing new the
+  row reads "Nothing new right now".{confirm}
+- The rows below list everything you shared, newest first. Select one to download it
+  on its own. The subtitle says whether the X3 already received it.
 {auto}
 ## Files
 
-- device.json: catalog, download and sleep-delivery settings. The server address and the
-  device token are written into it; download a new bundle from the app's Setup page if
-  either changes.
+- device.json: catalog and download settings (and sleep delivery when it is on). The
+  server address and the device token are written into it; download a new bundle from
+  the app's Setup page if either changes.
 - manifest.json: name and version.
 
 Version {__version__}.
@@ -222,6 +259,11 @@ def build_bundle_zip(*, base_url: str, device_token: str, opts: Options) -> byte
         keep = zipfile.ZipInfo(f"{inbox}/.keep", date_time=stamp)
         keep.external_attr = 0o100644 << 16
         z.writestr(keep, b"")
+        # An empty event queue: an older plugin's queued sleep.enter lines would otherwise
+        # take up the X3's 4-events-per-Wi-Fi-join budget ahead of the download reports.
+        outbox = zipfile.ZipInfo(OUTBOX_PATH.lstrip("/"), date_time=stamp)
+        outbox.external_attr = 0o100644 << 16
+        z.writestr(outbox, b"")
     return bio.getvalue()
 
 
@@ -316,6 +358,16 @@ async def install_to_device(device_host: str, *, base_url: str, device_token: st
                 return lines
             via = f" via {how}" if isinstance(how, str) and how else ""
             lines.append(f"Wrote {sd_path} ({len(data)} bytes{via}).")
+        # Events queued for the old manifest (0.1.0's sleep.enter lines) would hold back
+        # the download reports for many Wi-Fi joins; the device refuses empty uploads, so
+        # delete the queue instead of writing an empty one.
+        remove = getattr(client, "delete", None)
+        if remove is not None:
+            try:
+                if await remove(OUTBOX_PATH) is False:
+                    lines.append(f"Warning: could not clear {OUTBOX_PATH}; downloads may be confirmed late.")
+            except Exception as exc:  # noqa: BLE001 - informational
+                lines.append(f"Warning: could not clear {OUTBOX_PATH} ({_err_text(exc)}).")
 
         enabled: Optional[bool] = None
         probe = getattr(client, "plugins_enabled", None)

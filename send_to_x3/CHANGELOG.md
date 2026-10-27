@@ -4,6 +4,37 @@ All notable changes to this app are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the app uses
 [semantic versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-26
+
+### Changed
+
+- New items no longer arrive on the X3 by themselves. The first row of Home >
+  Plugins > Send to X3 is now **Get 3 new · Oct 26 14.05**: one press downloads
+  everything shared since the last fetch as one book in `/Inbox` (or **Nothing new
+  right now**). The OPDS feed starts with the same entry when something is new.
+- The X3 confirms what it saved: the plugin reports each download (its
+  `book.downloaded` event) the next time the X3 joins Wi-Fi, and only then do the
+  items count as delivered. A cancelled or failed download is offered again; a fetch
+  awaiting its report is not (the queue shows "sent, not confirmed yet"), and comes
+  back after two hours under a new name if no report arrives. Two "Get N new"
+  downloads never share a file name, so one never replaces another on the X3.
+- A download counts as received only once the X3's network stack acknowledged every
+  byte, not when the app handed it to the network (a cancelled small download used
+  to count).
+- Installing the plugin clears its old event queue on the X3, so leftover 0.1.0
+  sleep-delivery requests no longer delay the download reports.
+- If the bundle cannot be built (for example a full disk), the catalog and the OPDS
+  feed still list every item instead of failing.
+- `auto_delivery` (delivery when the X3 sleeps) is now off by default.
+
+### Upgrading from 0.1.0
+
+- Install the plugin on the X3 again (Setup page): the 0.1.0 plugin has delivery at
+  sleep built in, so the X3 keeps joining Wi-Fi at every sleep until you do, and it
+  cannot confirm downloads.
+- If you saved the app's Configuration under 0.1.0, it may still have **Also deliver
+  when the X3 sleeps** on: turn it off and restart the app before reinstalling.
+
 ## [0.1.0] - 2026-10-25
 
 ### Added

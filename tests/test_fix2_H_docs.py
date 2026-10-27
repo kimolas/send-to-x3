@@ -86,8 +86,7 @@ def test_sleep_delivery_is_promised_only_with_the_firmware_caveat(tr: dict[str, 
         assert "2.0.0rc" in unit, unit
         assert commit in unit, unit
         assert "next time the X3 uses Wi-Fi" in unit, unit
-    # Not vacuous: the three places users read about it carry the caveat.
-    assert any(u.startswith("- Works with **stock CrossPoint**") for u in claims), "README feature bullet"
+    # Not vacuous: the places users read about it carry the caveat.
     assert _docs_row("auto_delivery") in claims
     assert _flat(tr["auto_delivery"]["description"]) in claims
     assert any("Home > Plugins > Send to X3" in u for u in claims)
@@ -101,10 +100,15 @@ def test_no_unconditional_every_sleep_promise(path: Path) -> None:
     assert not bad, f"{path.name}: {bad.group(0)!r}"
 
 
-def test_docs_plugin_row_points_to_the_delivery_caveat() -> None:
+def test_docs_plugin_row_points_to_the_fetch_section() -> None:
     row = next(line for line in DOCS.read_text(encoding="utf-8").splitlines() if line.startswith("| CrossPoint 2.x |"))
-    assert "Automatic delivery" in row, row
-    assert "### Automatic delivery" in DOCS.read_text(encoding="utf-8")
+    assert "Fetching new items" in row and "Get 3 new" in row, row
+    assert "### Fetching new items" in DOCS.read_text(encoding="utf-8")
+
+
+def test_readme_says_nothing_arrives_by_itself() -> None:
+    bullet = next(u for u in _units(README) if u.startswith("- Works with **stock CrossPoint**"))
+    assert "Nothing arrives by itself" in bullet and "Get 3 new" in bullet, bullet
 
 
 # ============================================================== R2-H2 email rule

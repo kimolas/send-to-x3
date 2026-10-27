@@ -1,9 +1,15 @@
 """Endpoints for the CrossPoint 2.x plugin (``Authorization: Bearer <device_token>``).
 
-- ``GET /device/v1/catalog?page=P&limit=L``  catalog rows (JSON)
+- ``GET /device/v1/catalog?page=P&limit=L``  catalog rows (JSON); the first row is "Get N new"
+  (or "Nothing new right now")
 - ``GET /device/v1/items/<id>.epub|.txt``    one item; marks ``delivered.catalog``
+- ``GET /device/v1/items/all-<key>.epub|.txt`` the "Get N new" bundle; marks ``delivered.fetch``
+  once all of it was sent, or, with ``?confirm=1`` (the plugin reports saved files), when the
+  X3 confirms it. ``none.epub`` and replaced bundles answer 404.
+- ``POST /device/v1/fetched`` body = the SD path the X3 saved (its ``book.downloaded`` event);
+  always 200, so the X3's event queue never stalls on it
 - ``GET /device/v1/deliver?ev=&ts=``         zero-tap ``sleep.enter`` delivery or 404 (always 404
-  when the auto_delivery option is off)
+  when the auto_delivery option is off, the default)
 
 The firmware never follows redirects on these, treats any 2xx as success (an empty 200
 would become an empty file), needs Content-Length for progress, and never decodes gzip.
@@ -17,7 +23,9 @@ import re
 from aiohttp import web
 
 from .. import delivery
-from .common import bytes_response, get_state, json_bytes, json_error, parse_int, text_response, tokens_equal, bearer_token
+from ..plugin_bundle import PLUGIN_NAME
+from .common import (bearer_token, bytes_response, get_state, json_bytes, json_error, json_response, parse_int,
+                     send_whole, text_response, tokens_equal)
 
 CONTENT_TYPES = {"epub": "application/epub+zip", "txt": "text/plain; charset=utf-8"}
 ITEM_ID_RE = r"[a-z2-7]{10}"
@@ -45,8 +53,12 @@ async def catalog(request: web.Request) -> web.Response:
     state = get_state(request)
     page = parse_int(request.query.get("page"), 1)
     limit = parse_int(request.query.get("limit"), 9)
-    body = delivery.catalog_page(state.store, page, limit)
-    _seen(request, f"catalog page {max(1, page)}")
+    body = await asyncio.to_thread(delivery.catalog_page, state.store, page, limit,
+                                   fmt=state.opts.delivery_format)
+    if body["items"] and body["items"][0].get("title") == delivery.FETCH_FAILED_TITLE:
+        state.set_status("device_api", "warning", "\"Get N new\" could not be prepared; see the log")
+    else:
+        _seen(request, f"catalog page {max(1, page)}")
     return bytes_response(json_bytes(body), "application/json; charset=utf-8")
 
 
@@ -91,7 +103,52 @@ async def deliver(request: web.Request) -> web.Response:
     return bytes_response(data, CONTENT_TYPES["epub"])
 
 
+async def fetch_file(request: web.Request) -> web.StreamResponse:
+    if not _authorized(request):
+        return _unauthorized()
+    state = get_state(request)
+    fmt = request.match_info["fmt"]
+    bundle = await asyncio.to_thread(delivery.fetch_lookup, state.store, request.match_info["bundle_id"], fmt)
+    if bundle is None:
+        # "Nothing new right now", or a bundle replaced since the X3 loaded its list.
+        _seen(request, "fetch: nothing new")
+        return text_response("nothing new: open Send to X3 again\n", status=404)
+    confirm = request.query.get("confirm") == "1"
+    if confirm:  # recorded first, so a report can always be matched, whatever happens below
+        await asyncio.to_thread(delivery.fetch_sent, state.store, bundle, complete=False, confirm=True)
+    resp, whole = await send_whole(request, bundle.data, CONTENT_TYPES[fmt])
+    await asyncio.to_thread(delivery.fetch_sent, state.store, bundle, complete=whole, confirm=confirm)
+    if not whole:
+        _seen(request, f"the X3 stopped downloading {bundle.title!r}; it stays new")
+    else:
+        _seen(request, f"sent {bundle.title!r} ({len(bundle.data):,} bytes)"
+                       + ("; the X3 confirms it the next time it joins Wi-Fi" if confirm else ""))
+    return resp
+
+
+#: The firmware fills the body from ``{event.path}``; anything longer is not a path.
+MAX_CONFIRM_BYTES = 1024
+
+
+async def fetched(request: web.Request) -> web.Response:
+    if not _authorized(request):
+        return _unauthorized()
+    state = get_state(request)
+    plugin = request.query.get("plugin", "")
+    if plugin and plugin != PLUGIN_NAME:
+        # book.downloaded fires for every plugin's catalog downloads; theirs are not ours.
+        return json_response({"ok": True, "confirmed": 0})
+    path = (await request.content.read(MAX_CONFIRM_BYTES)).decode("utf-8", "replace").strip()
+    ids = await asyncio.to_thread(delivery.fetch_confirmed, state.store, path)
+    if ids:
+        _seen(request, f"the X3 confirmed {path.rsplit('/', 1)[-1]!r} ({len(ids)} item(s))")
+    return json_response({"ok": True, "confirmed": len(ids)})
+
+
 def add_routes(app: web.Application) -> None:
     app.router.add_get("/device/v1/catalog", catalog, allow_head=False)
     app.router.add_get(f"/device/v1/items/{{item_id:{ITEM_ID_RE}}}.{{fmt:(epub|txt)}}", item_file, allow_head=False)
+    app.router.add_get(f"/device/v1/items/{{bundle_id:{delivery.FETCH_ID_RE}|{delivery.NOTHING_NEW_ID}}}"
+                       ".{fmt:(epub|txt)}", fetch_file, allow_head=False)
     app.router.add_get("/device/v1/deliver", deliver, allow_head=False)
+    app.router.add_post("/device/v1/fetched", fetched)

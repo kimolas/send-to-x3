@@ -21,13 +21,14 @@ TOKEN = "device-test-token"
 
 
 def test_readme_does_not_promise_delivery_at_every_sleep_on_2_0_0rc(opts):
+    opts.auto_delivery = True
     text = readme_bytes(base_url=BASE, opts=opts).decode()
     assert "Every time the X3 goes to sleep" not in text
     assert "2.0.0rc" in text and "facaa87" in text
     assert "next time the X3 joins Wi-Fi" in text and "File Transfer" in text and "OPDS" in text
     opts.auto_delivery = False
     off = readme_bytes(base_url=BASE, opts=opts).decode()
-    assert "turned off" in off and "facaa87" not in off
+    assert "is off" in off and "facaa87" not in off and "Get 3 new" in off
 
 
 # ---------------------------------------------------------------- finding 28

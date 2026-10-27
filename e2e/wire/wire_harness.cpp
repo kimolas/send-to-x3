@@ -14,7 +14,8 @@
 // (loadManifest :226-328, substituted :396-418, downloadDir :420-431,
 // fetchBrowseResponse :637-671, parseBrowseResponse :752-837, downloadBook :1041-1138),
 // without the UI, compatibility filtering, lists, search, auth flows or bundles.
-// `sleep` and `drain` run the real pluginevents::emit/drain.
+// `sleep` and `drain` run the real pluginevents::emit/drain; a successful `download`
+// queues book.downloaded like PluginCatalogActivity does.
 //
 // Usage (SD card root in $CROSSPOINT_SIM_SD):
 //   wire_harness catalog <plugin dir on SD> [page]
@@ -143,6 +144,7 @@ struct Item {
 
 struct Catalog {
   Manifest m;
+  std::string manifestPath;  // "<plugin dir>/device.json", for the book.downloaded plugin name
   std::string token;
   pluginhttp::Headers config;
   int page = 1;
@@ -274,14 +276,29 @@ int download(Catalog& c, const Item& item) {
                                                      c.substitutedHeaders(c.m.downloadReq.headers, &item));
   static const char* NAMES[] = {"OK", "HTTP_ERROR", "FILE_ERROR", "ABORTED", "UNAUTHORIZED"};
   report(NAMES[static_cast<int>(result)], dest, HttpDownloader::lastStatus());
-  return result == HttpDownloader::OK ? 0 : 8;
+  if (result != HttpDownloader::OK) return 8;
+  // PluginCatalogActivity::downloadBook -> emitBookDownloaded (2.0.0rc :1136, :147-153):
+  // queue book.downloaded with path/title/plugin for the plugin's own outbox. The
+  // picker refreshes subscriptions before any catalog opens; do the same here.
+  pluginevents::refreshSubscriptions();
+  if (pluginevents::anySubscriber(pluginevents::Event::BookDownloaded)) {
+    const std::string manifest = c.manifestPath;
+    const size_t slash = manifest.rfind('/');
+    const size_t parent = slash == std::string::npos || slash == 0 ? std::string::npos : manifest.rfind('/', slash - 1);
+    const std::string plugin = parent == std::string::npos ? "" : manifest.substr(parent + 1, slash - parent - 1);
+    const pluginevents::Var vars[] = {{"path", dest.c_str()}, {"title", item.title.c_str()}, {"plugin", plugin.c_str()}};
+    pluginevents::emit(pluginevents::Event::BookDownloaded, vars, 3);
+    printf("@{\"type\":\"emit\",\"event\":\"book.downloaded\",\"path\":%s}\n", jsonStr(dest).c_str());
+  }
+  return 0;
 }
 
 int cmdCatalog(const std::string& pluginDir, int page, const char* wantId) {
   Catalog c;
   c.page = page;
+  c.manifestPath = pluginDir + "/device.json";
   std::string why;
-  if (!loadManifest(pluginDir + "/device.json", c.m, why)) {
+  if (!loadManifest(c.manifestPath, c.m, why)) {
     printf("@{\"type\":\"manifest\",\"ok\":false,\"why\":%s}\n", jsonStr(why).c_str());
     return 2;
   }

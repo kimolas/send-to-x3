@@ -9,14 +9,20 @@ real app (``run_e2e.py --backend local|docker``):
 - ``POST /api/v1/ingest`` (Bearer ingest token or ``?token=``): JSON, form or text/plain
   ``{url?, text?, title?}``; no fetching (a URL becomes a short note), title made
   firmware-safe (§8 subset), EPUB + TXT rendered immediately.
-- ``GET /device/v1/catalog?page=P&limit=L`` (Bearer device token): newest first, offset
-  ``(P-1)*(L-1)``.
+- ``GET /device/v1/catalog?page=P&limit=L`` (Bearer device token): a first row "Get N new"
+  (id ``all-<key>``) or "Nothing new right now" (id ``none``), then newest first; offset
+  ``(P-1)*(L-1)`` into that list.
 - ``GET /device/v1/items/<id>.epub|.txt``: marks ``delivered.catalog``.
+- ``GET /device/v1/items/all-<key>.epub|.txt``: everything new as one file (stored, so
+  repeats are byte-identical; titles never repeat); marks ``delivered.fetch``, or with
+  ``?confirm=1`` only once ``POST /device/v1/fetched`` (body: the saved SD path, from the
+  plugin's ``book.downloaded`` event) reports it. ``none`` and unknown keys: 404.
 - ``GET /device/v1/deliver?ev=&ts=``: idempotent per ``(ev, ts)``; digest of everything
   never delivered on any channel, oldest first, <= 900 KB; ``404`` when nothing is
   pending (status configurable to reproduce firmware regressions).
 - ``GET /opds[?page=N]`` + ``/opds/items/<id>.epub`` (HTTP Basic ``x3``:device token):
-  OPDS 1.2 acquisition feed, 50 per page, absolute next/previous links.
+  OPDS 1.2 acquisition feed, 50 per page, absolute next/previous links; page 1 starts with
+  "Get N new" when something is new.
 - LAN push worker (``--device-host``): polls ``/api/status`` of a CrossPoint File
   Transfer server, ``/mkdir`` + ``/upload`` one file per request, `` (2)`` suffix on
   "File already exists", verifies with ``/api/files``.
@@ -226,6 +232,9 @@ class State:
         self.lock = threading.RLock()
         self.items: dict[str, Item] = {}
         self.deliveries: dict[tuple[str, str], tuple[list[str], bytes]] = {}
+        self.fetches: dict[str, tuple[list[str], bytes, str]] = {}  # "all-<key>.<fmt>" -> (ids, data, title)
+        self.issued: set[str] = set()  # casefolded "Get N new" titles already sent to the X3
+        self.sent: dict[str, tuple[list[str], float]] = {}  # casefolded file name -> (ids, sent at)
         self.push_log: list[dict[str, Any]] = []
 
     def add(self, *, title: str, paragraphs: list[str], kind: str, source_url: str = "", byline: str = "") -> Item:
@@ -278,13 +287,78 @@ class State:
             self.deliveries[(ev, ts)] = ([i.id for i in batch], data)
             return data
 
+    def awaiting(self) -> set[str]:
+        """Items of bundles sent less than two hours ago that the X3 has not confirmed."""
+        now = time.time()
+        return {i for ids, at in self.sent.values() if now - at < 7200 for i in ids
+                if i in self.items and not self.items[i].delivered}
+
+    def fetch_bundle(self, fmt: str) -> Optional[tuple[str, list[str], bytes, str]]:
+        """``(id, item ids, data, title)`` of "Get N new", or None when nothing is new."""
+        with self.lock:
+            waiting = self.awaiting()
+            pending = [i for i in reversed(self.newest_first()) if not i.delivered and i.id not in waiting]
+            if not pending:
+                return None
+            key = base64.b32encode(hashlib.sha256(
+                "|".join(f"{i.id}:{i.title}" for i in pending).encode()).digest()).decode().lower()[:10]
+            bid = f"all-{key}"
+            if f"{bid}.{fmt}" not in self.fetches:
+                batch: list[Item] = []
+                size = 0
+                for it in pending:
+                    if batch and size + len(it.epub) > DIGEST_LIMIT:
+                        break
+                    batch.append(it)
+                    size += len(it.epub)
+                if fmt == "txt":
+                    data = b"\n\n* * *\n\n".join(i.txt.strip() for i in batch) + b"\n"
+                elif len(batch) == 1:
+                    data = batch[0].epub
+                else:
+                    data = render_epub(batch, f"Inbox: {len(batch)} items ({time.strftime('%Y-%m-%d %H:%M')})")
+                t = time.localtime(max(i.created_at for i in batch))
+                base = f"Get {len(batch)} new · {time.strftime('%b', t)} {t.tm_mday} {t.tm_hour:02d}.{t.tm_min:02d}"
+                title, n = base, 2
+                while title.casefold() in self.issued or any(title.casefold() == i.title.casefold()
+                                                              for i in self.items.values()):
+                    title, n = f"{base} ({n})", n + 1
+                self.fetches = {k: v for k, v in self.fetches.items() if not k.endswith(f".{fmt}")}
+                self.fetches[f"{bid}.{fmt}"] = ([i.id for i in batch], data, title)
+            ids, data, title = self.fetches[f"{bid}.{fmt}"]
+            return bid, ids, data, title
+
+    def fetch(self, name: str, *, confirm: bool = False) -> Optional[bytes]:
+        with self.lock:
+            got = self.fetches.get(name)
+            if got is None:
+                return None
+            ids, data, title = got
+            self.issued.add(title.casefold())
+            if confirm:
+                self.sent[f"{title}.{name.rsplit('.', 1)[1]}".casefold()] = (list(ids), time.time())
+            else:
+                for i in ids:
+                    if i in self.items:
+                        self.mark(self.items[i], "fetch")
+            return data
+
+    def confirmed(self, path: str) -> int:
+        with self.lock:
+            ids, _ = self.sent.pop(path.rsplit("/", 1)[-1].strip().casefold(), ([], 0.0))
+            for i in ids:
+                if i in self.items:
+                    self.mark(self.items[i], "fetch")
+            return len(ids)
+
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             return {"items": [i.public() for i in self.newest_first()],
                     "deliveries": [{"ev": ev, "ts": ts, "items": ids, "bytes": len(data),
                                     "sha256": hashlib.sha256(data).hexdigest()}
                                    for (ev, ts), (ids, data) in self.deliveries.items()],
-                    "push_log": list(self.push_log)}
+                    "push_log": list(self.push_log),
+                    "unconfirmed": {name: ids for name, (ids, _) in self.sent.items()}}
 
 
 # ---------------------------------------------------------------------------------------
@@ -425,10 +499,28 @@ class Handler(BaseHTTPRequestHandler):
                     limit = min(50, max(1, int((q.get("limit") or ["9"])[0])))
                 except ValueError:
                     return self._send(400, b'{"error":"bad paging"}')
-                rows = st.newest_first()
+                fmt = self.server.catalog_format
+                bundle = st.fetch_bundle(fmt)
+                first = ({"id": bundle[0], "title": bundle[3], "subtitle": "Everything new in one book"} if bundle
+                         else {"id": "none", "title": "Nothing new right now",
+                               "subtitle": ("Your last fetch is confirmed the next time the X3 joins Wi-Fi."
+                                            if st.awaiting() else
+                                            "Share something to Send to X3, then open this list again.")})
+                rows = [first] + [{"id": i.id, "title": i.title, "subtitle": _subtitle(i)} for i in st.newest_first()]
                 off = (page - 1) * max(1, limit - 1)
-                items = [{"id": i.id, "title": i.title, "subtitle": _subtitle(i)} for i in rows[off:off + limit]]
-                return self._json(200, {"items": items})
+                return self._json(200, {"items": rows[off:off + limit]})
+            if path == "/device/v1/fetched":
+                if self.command != "POST":
+                    return self._send(405, b'{"error":"POST only"}')
+                if (q.get("plugin") or [""])[0] not in ("", "sendtox3"):
+                    return self._json(200, {"ok": True, "confirmed": 0})
+                return self._json(200, {"ok": True, "confirmed": st.confirmed(body[:1024].decode("utf-8", "replace"))})
+            m = re.fullmatch(r"/device/v1/items/(all-[a-z2-7]{10}|none)\.(epub|txt)", path)
+            if m:
+                data = st.fetch(f"{m.group(1)}.{m.group(2)}", confirm=(q.get("confirm") or [""])[0] == "1")
+                if data is None:
+                    return self._send(404, b"nothing new\n", "text/plain")
+                return self._send(200, data, "application/epub+zip" if m.group(2) == "epub" else "text/plain; charset=utf-8")
             m = re.fullmatch(r"/device/v1/items/([a-z2-7]{10})\.(epub|txt)", path)
             if m:
                 item = st.items.get(m.group(1))
@@ -454,6 +546,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(401, b"unauthorized\n", "text/plain", extra={"WWW-Authenticate": 'Basic realm="x3"'})
             if path == "/opds":
                 return self._opds_feed(q)
+            m = re.fullmatch(r"/opds/items/(all-[a-z2-7]{10})\.epub", path)
+            if m:
+                data = st.fetch(f"{m.group(1)}.epub")
+                if data is None:
+                    return self._send(404, b"nothing new\n", "text/plain")
+                return self._send(200, data, "application/epub+zip")
             m = re.fullmatch(r"/opds/items/([a-z2-7]{10})\.epub", path)
             if m and m.group(1) in st.items:
                 item = st.items[m.group(1)]
@@ -499,6 +597,12 @@ class Handler(BaseHTTPRequestHandler):
             links.append('<link rel="previous" type="application/atom+xml;profile=opds-catalog;kind=acquisition" '
                          f'href="{base}/opds?page={page - 1}"/>')
         entries = []
+        bundle = st.fetch_bundle("epub") if page == 1 else None
+        if bundle:
+            entries.append(
+                f"<entry><title>{_x(bundle[3])}</title><id>urn:sendtox3:{bundle[0]}</id><updated>{updated}</updated>"
+                f'<link rel="http://opds-spec.org/acquisition" type="application/epub+zip" '
+                f'href="/opds/items/{bundle[0]}.epub"/></entry>')
         for it in chunk:
             author = it.byline or (urllib.parse.urlsplit(it.source_url).hostname or "Send to X3")
             title = it.title.encode("utf-8")[:120].decode("utf-8", "ignore")
@@ -518,8 +622,10 @@ class MockServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, addr: tuple[str, int], *, ingest_token: str, device_token: str, log_path: Optional[str],
-                 empty_deliver_status: int = 404, opds_auth: bool = True, verbose: bool = False) -> None:
+                 empty_deliver_status: int = 404, opds_auth: bool = True, verbose: bool = False,
+                 catalog_format: str = "epub") -> None:
         super().__init__(addr, Handler)
+        self.catalog_format = catalog_format  # the plugin's download format ("Get N new" is built for it)
         self.state = State()
         self.ingest_token = ingest_token
         self.device_token = device_token
@@ -624,12 +730,13 @@ class Pusher(threading.Thread):
 def serve(*, host: str = "127.0.0.1", port: int = 0, ingest_token: str, device_token: str,
           log_path: Optional[str] = None, empty_deliver_status: int = 404, opds_auth: bool = True,
           device_host: str = "", push_poll: float = 2.0, push_format: str = "txt",
-          verbose: bool = False) -> tuple[MockServer, threading.Thread, Optional[Pusher]]:
+          verbose: bool = False, catalog_format: str = "epub") -> tuple[MockServer, threading.Thread, Optional[Pusher]]:
     """Start the mock in background threads (for in-process use and tests)."""
     if host not in ("127.0.0.1", "::1", "localhost"):
         raise ValueError("the mock backend only binds loopback")
     srv = MockServer((host, port), ingest_token=ingest_token, device_token=device_token, log_path=log_path,
-                     empty_deliver_status=empty_deliver_status, opds_auth=opds_auth, verbose=verbose)
+                     empty_deliver_status=empty_deliver_status, opds_auth=opds_auth, verbose=verbose,
+                     catalog_format=catalog_format)
     t = threading.Thread(target=srv.serve_forever, daemon=True, name="mock-http")
     t.start()
     pusher = None
@@ -652,12 +759,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--device-host", default="", help="host:port of a CrossPoint File Transfer server to push to")
     ap.add_argument("--push-poll", type=float, default=2.0)
     ap.add_argument("--push-format", choices=("txt", "epub"), default="txt")
+    ap.add_argument("--catalog-format", choices=("txt", "epub"), default="epub",
+                    help="download format of the plugin bundle (the \"Get N new\" row is built for it)")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
     srv, t, _ = serve(host=a.host, port=a.port, ingest_token=a.ingest_token, device_token=a.device_token,
                       log_path=a.log, empty_deliver_status=a.empty_deliver_status, opds_auth=not a.no_opds_auth,
                       device_host=a.device_host, push_poll=a.push_poll, push_format=a.push_format,
-                      verbose=a.verbose)
+                      verbose=a.verbose, catalog_format=a.catalog_format)
     print(f"READY http://{a.host}:{srv.server_address[1]}", flush=True)
     try:
         t.join()

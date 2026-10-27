@@ -41,6 +41,33 @@ def store(data_dir) -> Store:
     s.close()
 
 
+@pytest.fixture
+async def serve_like_main():
+    """Serve an app the way ``__main__`` does (an ``AppRunner`` with aiohttp's default
+    ``handler_cancellation=False``) and return a client session for it. aiohttp's test
+    server always cancels a handler whose client went away, which would stop a handler
+    that is still waiting for the client's TCP acknowledgement of a download."""
+    from aiohttp import ClientSession, CookieJar, web
+
+    started = []
+
+    async def start(app):
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        # unsafe=True: keep cookies for an IP address, as aiohttp's test client does.
+        session = ClientSession(base_url=f"http://127.0.0.1:{port}", cookie_jar=CookieJar(unsafe=True))
+        started.append((runner, session))
+        return session
+
+    yield start
+    for runner, session in started:
+        await session.close()
+        await runner.cleanup()
+
+
 def pytest_collection_modifyitems(config, items):
     skip_net = pytest.mark.skip(reason="set SENDTOX3_NETWORK_TESTS=1 to run")
     skip_docker = pytest.mark.skip(reason="set SENDTOX3_DOCKER_TESTS=1 to run")

@@ -73,12 +73,13 @@ def _check_landed(ctx: Context, card: sdmod.SdCard, label: str, ex, ev: str, ts:
 
 @scenario("S2", "sleep auto-delivery (200 digest, 404 keeps queue, retry)", firmwares=("2.0.0rc", "3f387a9"))
 def run(ctx: Context) -> None:
-    backend, tap = ctx.start_backend()
+    backend, tap = ctx.start_backend(extra_options={"auto_delivery": True})  # off by default
     token = f"Bearer {backend.device_token}"
     for t, txt in (("Morning digest one", "First pending article.\n\nSecond paragraph."),
                    ("Morning digest two", "Second pending article.")):
         backend.seed(title=t, text=txt)
-    card = sdmod.build_sd(ctx.out / "sd", ctx.fw, bundle=backend.bundle_zip(source=ctx.bundle_source))
+    card = sdmod.build_sd(ctx.out / "sd", ctx.fw, bundle=backend.bundle_zip(source=ctx.bundle_source,
+                                                                           auto_delivery=True))
     cold = ctx.fw.cold_sleep_delivery
     seen = 0
 

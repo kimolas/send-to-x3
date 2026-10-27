@@ -26,7 +26,7 @@ def test_note_only_delivery_keeps_the_item_pending(store):
     it = store.get(huge.id)
     assert it.is_pending and it.delivered == {}
     assert [i.id for i in store.pending_items()] == [huge.id]  # LAN push still pushes it
-    row = catalog_page(store, 1, 9)["items"][0]
+    row = catalog_page(store, 1, 9)["items"][1]
     assert row["subtitle"].startswith("New · ")
     # The note is sent once; later items are delivered normally.
     assert build_auto_delivery(store, "e", "2") is None

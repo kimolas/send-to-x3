@@ -57,8 +57,8 @@ configuration:
     name: "LAN push folder"
     description: "Folder on the X3's SD card that LAN push uploads to."
   auto_delivery:
-    name: "Deliver when the X3 sleeps"
-    description: "CrossPoint 2.x plugin: download new items automatically, with no taps. They are delivered when the X3 goes to sleep on your home Wi-Fi on builds newer than 2.0.0rc (with develop commit facaa87). On 2.0.0rc they arrive the next time the X3 uses Wi-Fi: opening Home > Plugins > Send to X3, OPDS or File Transfer. Reinstall the plugin on the X3 after changing this."
+    name: "Also deliver when the X3 sleeps"
+    description: "Off by default: you fetch new items yourself with the first row of Home > Plugins > Send to X3 (\"Get 3 new\"). On, the CrossPoint 2.x plugin also downloads new items automatically, joining Wi-Fi at every sleep, on builds newer than 2.0.0rc (with develop commit facaa87). On 2.0.0rc they arrive the next time the X3 uses Wi-Fi. Reinstall the plugin on the X3 after changing this."
   delivery_format:
     name: "Download format"
     description: "Format of plugin catalog downloads and LAN push. EPUB reads better and keeps proper titles; TXT gives plain .txt files. Sleep delivery always uses EPUB. Reinstall the plugin on the X3 after changing this."

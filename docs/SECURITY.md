@@ -30,7 +30,7 @@ tight. Example address of the Pi: `192.168.1.50`.
 |---|---|---|
 | `/healthz` | Nothing (open) | Home Assistant's watchdog. Answers `{"ok":true,"version":"..."}`; reveals only that the app runs and its version. |
 | `/api/v1/ingest` | **Ingest token** (`Authorization: Bearer <token>`, or `?token=<token>`) | Phone shortcuts, scripts |
-| `/device/v1/catalog`, `/device/v1/items/...`, `/device/v1/deliver` | **Device token** (`Authorization: Bearer <token>`) | The X3 plugin (CrossPoint 2.x) |
+| `/device/v1/catalog`, `/device/v1/items/...`, `/device/v1/deliver`, `POST /device/v1/fetched` | **Device token** (`Authorization: Bearer <token>`) | The X3 plugin (CrossPoint 2.x) |
 | `/opds`, `/opds/items/...` | **Device token** as the HTTP Basic password (any user name; `x3` by convention) | OPDS on the X3 |
 | `/admin/...` | **Admin token**, once; then a signed session cookie for 30 days | The web UI from a browser on your network. The Setup page and its downloads (plugin bundle, Android file) contain the device or ingest token. |
 
@@ -71,8 +71,11 @@ This is the X3 firmware's design, not something Send to X3 can change:
 - When the X3 leaves File Transfer (or goes to sleep), the server is gone.
 
 What the device token allows: reading the catalog and the OPDS feed (the titles and full
-text of everything in your queue), and asking for the delivery at sleep (which marks
-items as delivered, so they would no longer reach your X3 automatically). It does
+text of everything in your queue), and fetching **Get N new**, confirming it or the
+delivery at sleep (which marks items as delivered, so they would no longer be in your
+next **Get N new**). The X3 reports the SD path of every catalog download it saves, from
+any plugin, to `POST /device/v1/fetched`; the app ignores reports from other plugins
+without reading them and keeps nothing of them. It does
 **not** allow adding items, changing settings, seeing the other tokens or using the
 web UI.
 
