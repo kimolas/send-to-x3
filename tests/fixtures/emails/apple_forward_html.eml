@@ -1,0 +1,71 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Fwd: On slow reading
+Message-ID: <A1B2C3D4-0004@example.org>
+Content-Type: multipart/alternative; boundary="Apple-Mail=_AAAA-0004"
+X-Mailer: Apple Mail (2.3826.700.81)
+
+--Apple-Mail=_AAAA-0004
+Content-Transfer-Encoding: 7bit
+Content-Type: text/plain;
+	charset=us-ascii
+
+
+
+Begin forwarded message:
+
+From: Dana Essayist <dana@example.com>
+Subject: On slow reading
+Date: October 21, 2026 at 7:45:10 AM EDT
+To: Qiong Example <qiong@example.org>
+
+Why slow reading matters
+
+Slow reading is a practice of attention. An e-ink screen helps because nothing moves, nothing blinks, and nothing asks for a tap.
+
+Try one long essay a week, on paper or on an e-reader, without notifications.
+
+--Apple-Mail=_AAAA-0004
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html;
+	charset=utf-8
+
+<html><head><meta http-equiv=3D"content-type" content=3D"text/html; charset=
+=3Dutf-8"></head><body style=3D"overflow-wrap: break-word;"><div dir=3D"aut=
+o"><br></div><div dir=3D"auto"><div><br><blockquote type=3D"cite"><div>Begi=
+n forwarded message:</div><br class=3D"Apple-interchange-newline"><div styl=
+e=3D"margin-top: 0px; margin-right: 0px; margin-bottom: 0px; margin-left: 0=
+px;"><span style=3D"font-family: -webkit-system-font, Helvetica Neue, Helve=
+tica, sans-serif; color:rgba(0, 0, 0, 1.0);"><b>From: </b></span><span styl=
+e=3D"font-family: -webkit-system-font, Helvetica Neue, Helvetica, sans-seri=
+f;">Dana Essayist &lt;<a href=3D"mailto:dana@example.com">dana@example.com<=
+/a>&gt;<br></span></div><div style=3D"margin-top: 0px; margin-right: 0px; m=
+argin-bottom: 0px; margin-left: 0px;"><span style=3D"font-family: -webkit-s=
+ystem-font, Helvetica Neue, Helvetica, sans-serif; color:rgba(0, 0, 0, 1.0)=
+;"><b>Subject: </b></span><span style=3D"font-family: -webkit-system-font, =
+Helvetica Neue, Helvetica, sans-serif;"><b>On slow reading</b><br></span></=
+div><div style=3D"margin-top: 0px; margin-right: 0px; margin-bottom: 0px; m=
+argin-left: 0px;"><span style=3D"font-family: -webkit-system-font, Helvetic=
+a Neue, Helvetica, sans-serif; color:rgba(0, 0, 0, 1.0);"><b>Date: </b></sp=
+an><span style=3D"font-family: -webkit-system-font, Helvetica Neue, Helveti=
+ca, sans-serif;">October 21, 2026 at 7:45:10 AM EDT<br></span></div><div st=
+yle=3D"margin-top: 0px; margin-right: 0px; margin-bottom: 0px; margin-left:=
+ 0px;"><span style=3D"font-family: -webkit-system-font, Helvetica Neue, Hel=
+vetica, sans-serif; color:rgba(0, 0, 0, 1.0);"><b>To: </b></span><span styl=
+e=3D"font-family: -webkit-system-font, Helvetica Neue, Helvetica, sans-seri=
+f;">Qiong Example &lt;<a href=3D"mailto:qiong@example.org">qiong@example.or=
+g</a>&gt;<br></span></div><br><div><div><h2>Why slow reading matters</h2><p=
+>Slow reading is a practice of attention. An e-ink screen helps because not=
+hing moves, nothing blinks, and nothing asks for a tap.</p><p>Try one long =
+essay a week, on paper or on an e-reader, without notifications.</p></div><=
+/div></blockquote></div><br></div></body></html>
+
+--Apple-Mail=_AAAA-0004--

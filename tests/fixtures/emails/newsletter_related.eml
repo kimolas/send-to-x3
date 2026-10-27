@@ -1,0 +1,72 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@mail.example.net header.s=nl header.b=Zz99;
+       spf=pass (google.com: domain of bounce@mail.example.net designates 192.0.2.20 as permitted sender) smtp.mailfrom=bounce@mail.example.net;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.net
+MIME-Version: 1.0
+Date: Sat, 24 Oct 2026 12:00:00 +0000
+From: The Quiet Letter <letter@example.net>
+To: x3reader+k7q2@gmail.com
+Subject: The Quiet Letter #12: Libraries
+List-Unsubscribe: <https://example.net/u/1>
+Message-ID: <nl-0010@mail.example.net>
+Content-Type: multipart/alternative; boundary="ALT0010"
+
+--ALT0010
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+View this email in your browser [https://example.net/v/1?utm_source=nl]
+
+THE QUIET LETTER [https://example.net/?utm_source=nl]
+
+Issue 12 [https://example.net/12?utm_source=nl] - essays [https://example.net/essays] and links [https://example.net/links]
+
+A long essay about libraries.
+
+Unsubscribe [https://example.net/u/1] | Manage preferences [https://example.net/p/1]
+
+--ALT0010
+Content-Type: multipart/related; boundary="REL0010"; type="text/html"
+
+--REL0010
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html><html><head><meta charset=3D"utf-8"><title>The Quiet Letter<=
+/title><style>.mobile{display:none}</style></head>
+<body><div style=3D"display:none;max-height:0;overflow:hidden;mso-hide:all"=
+>This week: libraries, silence and the long walk home &zwnj;&nbsp;&zwnj;&nb=
+sp;</div>
+<table width=3D"100%"><tr><td align=3D"center"><a href=3D"https://example.n=
+et/v/1?utm_source=3Dnl">View this email in your browser</a></td></tr>
+<tr><td><img src=3D"cid:logo@example.net" alt=3D"The Quiet Letter" width=3D=
+"200"></td></tr>
+<tr><td><h1>The Quiet Letter</h1><h2>Issue 12: Libraries</h2>
+<p>Public libraries are one of the few places where you can stay as long as=
+ you like without buying anything. This issue is about what that does for r=
+eading.</p>
+<p>We visited three small branch libraries and asked the staff what people =
+read when nobody is watching. The answers were surprising: poetry, repair m=
+anuals, and long novels.</p>
+<blockquote>A library is a quiet argument that time spent reading is time w=
+ell spent.</blockquote>
+<p>Next week: walking and thinking.</p></td></tr>
+<tr><td style=3D"font-size:11px;color:#888">You are receiving this email be=
+cause you signed up at example.net.<br><a href=3D"https://example.net/u/1">=
+Unsubscribe</a> | <a href=3D"https://example.net/p/1">Manage preferences</a=
+></td></tr>
+<tr><td><img src=3D"https://example.net/open.gif?u=3D1" width=3D"1" height=
+=3D"1" alt=3D""></td></tr></table></body></html>
+
+--REL0010
+Content-Type: image/png; name="logo.png"
+Content-ID: <logo@example.net>
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+--REL0010--
+
+--ALT0010--

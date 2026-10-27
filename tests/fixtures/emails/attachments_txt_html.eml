@@ -1,0 +1,55 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Some files
+Message-ID: <att-0015@example.org>
+Content-Type: multipart/mixed; boundary="MIX0015"
+
+--MIX0015
+Content-Type: text/plain; charset=utf-8
+
+Here are the files.
+
+--MIX0015
+Content-Type: text/plain; charset=windows-1252; name="reading_list.txt"
+Content-Disposition: attachment; filename="reading_list.txt"
+Content-Transfer-Encoding: base64
+
+UmVhZGluZyBsaXN0DQoNCjEuIE9uIGJvcmVkb20NCjIuIFRoZSBxdWlldCBzY3JlZW4glyBlc3Nh
+eQ0K
+--MIX0015
+Content-Type: application/octet-stream; name="quiet-screen.html"
+Content-Disposition: attachment; filename="quiet-screen.html"
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGhlYWQ+PHRpdGxlPlNhdmVkIHBhZ2U6IHRoZSBxdWlldCBzY3JlZW48L3RpdGxlPjwv
+aGVhZD48Ym9keT48aDE+VGhlIHF1aWV0IHNjcmVlbjwvaDE+PHA+QW4gZXNzYXkgc2F2ZWQgYXMg
+YSB3ZWIgcGFnZSwgYWJvdXQgc2NyZWVucyB0aGF0IHN0YXkgc3RpbGwuPC9wPjwvYm9keT48L2h0
+bWw+
+--MIX0015
+Content-Type: image/jpeg; name="IMG_0001.jpg"
+Content-Disposition: inline; filename="IMG_0001.jpg"
+Content-Transfer-Encoding: base64
+
+/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==
+--MIX0015
+Content-Type: text/plain; charset=windows-1252; name="reading_list copy.txt"
+Content-Disposition: attachment; filename="reading_list copy.txt"
+Content-Transfer-Encoding: base64
+
+UmVhZGluZyBsaXN0DQoNCjEuIE9uIGJvcmVkb20NCjIuIFRoZSBxdWlldCBzY3JlZW4glyBlc3Nh
+eQ0K
+--MIX0015
+Content-Type: text/plain; charset=us-ascii; name="ATT00001.txt"
+Content-Disposition: attachment; filename="ATT00001.txt"
+
+_______________________________________________
+List footer
+--MIX0015--

@@ -1,0 +1,84 @@
+configuration:
+  log_level:
+    name: "Log level"
+    description: "How much detail to write to the app log. Use debug when you report a problem."
+  server_host:
+    name: "Server address for the X3"
+    description: "IP address or host name, optionally with :port, that your X3 uses to reach this app, for example 192.168.1.50 or 192.168.1.50:8765. Leave empty to detect the LAN address of your Home Assistant host. Set it if the X3 reaches Home Assistant under another address."
+  ingest_token:
+    name: "Share token"
+    description: "Secret that phones, shortcuts and scripts send to the share API. Leave empty to generate one on first start; the app's web UI shows it. If you set it yourself, use letters, digits, - and _ (other characters can break links that carry it)."
+  device_token:
+    name: "Device token"
+    description: "Secret your X3 sends to the plugin and OPDS endpoints (OPDS user name: x3). Leave empty to generate one. If you set it yourself, use only printable ASCII characters (letters, digits, punctuation): no spaces and none of { } \" \\. The X3 plugin cannot use other characters. Letters and digits are easiest to type on the X3. If you change it, reinstall the plugin on the X3 and update the OPDS password. It can be read from the X3 while File Transfer is open; to replace a generated one, use New device token on the Setup page of the app's web UI."
+  admin_token:
+    name: "Admin token"
+    description: "Secret for the web UI on the LAN port (/admin). Not needed when you open the app from Home Assistant. Leave empty to generate one. If you set it yourself, use letters, digits, - and _ (other characters can break links that carry it)."
+  imap_enabled:
+    name: "Receive by email"
+    description: "Check a mailbox over IMAP and turn new messages (text, links, PDF attachments) into reading items. Mail is processed only when Allowed senders and/or Secret plus-address tag is set; with neither, no mail is read. Refused mail is left unread. A message that is a link plus at most 30 words of your own is fetched as the linked page, with your words kept as a note."
+  imap_host:
+    name: "IMAP server"
+    description: "Host name of your mail provider's IMAP server (TLS). imap.gmail.com for Gmail."
+  imap_port:
+    name: "IMAP port"
+    description: "993 for IMAP over TLS."
+  imap_user:
+    name: "IMAP user name"
+    description: "Usually your full email address."
+  imap_password:
+    name: "IMAP password"
+    description: "For Gmail, create an app password in your Google account (Security, App passwords); your normal password does not work."
+  imap_folder:
+    name: "Mailbox folder"
+    description: "Folder or Gmail label to watch, for example INBOX. A label that only your shares go to is safest."
+  imap_processed_folder:
+    name: "Move processed mail to"
+    description: "Optional folder or Gmail label to move handled messages to. Leave empty to only mark them as read."
+  imap_plus_tag:
+    name: "Secret plus-address tag"
+    description: "Accept only mail sent to your address with this tag after a plus sign. With tag x3-7f2k, send to you+x3-7f2k@gmail.com. Leave empty to skip this check; then Allowed senders must be set, or no mail is processed."
+  allowed_senders:
+    name: "Allowed senders"
+    description: "Accept only mail from these addresses, one per entry; example.com or @example.com accepts a whole domain. * accepts any sender, but only together with a Secret plus-address tag or a Mailbox folder other than INBOX. Leave empty to rely on the plus-address tag alone; with neither set, no mail is processed. Refused mail is left unread."
+  require_dmarc:
+    name: "Require authenticated senders"
+    description: "Accept a message only if your mail provider marked it DMARC pass or aligned DKIM pass, so a forged From address is rejected. Turn off only if your provider does not add an Authentication-Results header."
+  ha_share_enabled:
+    name: "Home Assistant share sheet"
+    description: "Receive pages and text shared to the Home Assistant Companion app on your phone."
+  device_host:
+    name: "X3 address for LAN push"
+    description: "IP address or host name of your X3. When set, new items are uploaded while the X3 shows its File Transfer screen (CrossPoint 1.6.5 and 2.x). Leave empty to turn LAN push off."
+  push_poll_seconds:
+    name: "LAN push check interval (seconds)"
+    description: "How often to check whether the X3's File Transfer server is reachable."
+  push_folder:
+    name: "LAN push folder"
+    description: "Folder on the X3's SD card that LAN push uploads to."
+  auto_delivery:
+    name: "Deliver when the X3 sleeps"
+    description: "CrossPoint 2.x plugin: download new items automatically, with no taps. They are delivered when the X3 goes to sleep on your home Wi-Fi on builds newer than 2.0.0rc (with develop commit facaa87). On 2.0.0rc they arrive the next time the X3 uses Wi-Fi: opening Home > Plugins > Send to X3, OPDS or File Transfer. Reinstall the plugin on the X3 after changing this."
+  delivery_format:
+    name: "Download format"
+    description: "Format of plugin catalog downloads and LAN push. EPUB reads better and keeps proper titles; TXT gives plain .txt files. Sleep delivery always uses EPUB. Reinstall the plugin on the X3 after changing this."
+  inbox_folder:
+    name: "X3 inbox folder"
+    description: "Folder on the X3's SD card where the 2.x plugin saves downloads."
+  retention_days:
+    name: "Keep items for (days)"
+    description: "Items older than this are deleted from Home Assistant. Files already on the X3 stay there."
+  pdf_enabled:
+    name: "Convert PDFs"
+    description: "Extract the text of shared and emailed PDFs."
+  pdf_ocr:
+    name: "OCR scanned PDFs"
+    description: "Recognise the text of scanned PDFs that have no text layer (Tesseract, English). Slow on a Raspberry Pi: roughly 10-20 seconds per page, at most 20 pages per PDF. Off: scanned PDFs arrive with a note instead."
+  fetch_timeout_seconds:
+    name: "Web page timeout (seconds)"
+    description: "How long to wait for a shared web page to download."
+  allow_private_urls:
+    name: "Allow local network URLs"
+    description: "Allow fetching pages from private, loopback and link-local addresses, such as a NAS or router. Off by default as a safety measure; off also means pages are fetched over IPv4 only (IPv6-only sites are refused)."
+network:
+  8765/tcp: "LAN port for the X3 (plugin and OPDS), phone shortcuts and the share API. Plain HTTP: do not forward it to the internet."

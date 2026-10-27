@@ -40,7 +40,7 @@ class Options:
     imap_folder: str = "INBOX"
     imap_processed_folder: str = ""  # optional move target after processing
     imap_plus_tag: str = ""  # accept only mail addressed to <user>+<tag>@...
-    allowed_senders: list[str] = field(default_factory=list)  # empty = any sender
+    allowed_senders: list[str] = field(default_factory=list)  # empty: imap_plus_tag decides; neither set = no mail accepted
     require_dmarc: bool = True
 
     # Home Assistant Companion app share sheet (mobile_app.share events)
@@ -58,6 +58,7 @@ class Options:
 
     retention_days: int = 30
     pdf_enabled: bool = True
+    pdf_ocr: bool = False  # OCR scanned PDFs with tesseract (slow on a Pi: ~10-15 s/page)
     fetch_timeout_seconds: int = 20
     allow_private_urls: bool = False  # SSRF guard for URL fetching
 

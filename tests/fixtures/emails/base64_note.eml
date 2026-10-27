@@ -1,0 +1,20 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Re: [x3] Morning notes
+Message-ID: <b64-0009@example.org>
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+R3JvY2VyeSB0aG91Z2h0cyBhbmQgYSBwb2VtIGRyYWZ0LgoKVGhlIG1vcm5pbmcgd2FzIGdyZXkg
+YW5kIHRoZSBjYWbDqSBvbiB0aGUgY29ybmVyIGhhZCBhbHJlYWR5IHB1dCBpdHMgY2hhaXJzIG91
+dC4gSSB3cm90ZSB0aHJlZSBsaW5lcyBhbmQgY3Jvc3NlZCBvdXQgdHdvLgoKUmVtZW1iZXI6IG5h
+w692ZSBvcHRpbWlzbSBpcyBzdGlsbCBvcHRpbWlzbSDigJQgYW5kIGNvZmZlZSBpcyBjaGVhcGVy
+IGF0IGhvbWUuCg==

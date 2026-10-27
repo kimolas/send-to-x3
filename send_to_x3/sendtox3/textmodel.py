@@ -84,6 +84,11 @@ _DROP_RE = re.compile(
 )
 # C0/C1 controls except \n and \t (handled separately).
 _CTRL_RE = re.compile("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]")
+# BMP noncharacters (U+FDD0-FDEF, U+FFFE, U+FFFF; the supplementary-plane ones fall in
+# the emoji range below) and lone surrogates (JSON "\ud800", surrogateescape decoding):
+# the latter cannot even be encoded as UTF-8. Applied after NFC, which first joins
+# valid surrogate pairs into the real character.
+_NONCHAR_RE = re.compile("[\ud800-\udfff\ufdd0-\ufdef\ufffe\uffff]")
 
 # Symbols outside the X3 built-in font coverage with readable ASCII stand-ins.
 _SUBSTITUTES = {
@@ -172,17 +177,23 @@ def _is_emoji_or_symbol(ch: str) -> bool:
 def clean_text(s: str, *, keep_newlines: bool = False) -> str:
     """Normalize a run of text for the X3.
 
-    - NFC, drop invisible/bidi/control characters, map unsupported symbols to ASCII,
+    - NFC, drop invisible/bidi/control characters, noncharacters and lone surrogates
+      (so the result always encodes as UTF-8), map unsupported symbols to ASCII,
       drop emoji. Scripts the font does not cover (Greek, CJK, ...) are kept: they
       render as boxes unless the user installed an SD-card font, which is better than
       silently losing text.
-    - Collapses runs of spaces; trims. With ``keep_newlines`` newlines survive (for
-      preformatted text); otherwise all whitespace collapses to single spaces.
+    - Collapses runs of spaces; trims. With ``keep_newlines`` newlines and indentation
+      survive (for preformatted text: tabs become 4 spaces, only trailing spaces and
+      leading/trailing blank lines are removed); otherwise all whitespace collapses to
+      single spaces.
     """
     if not s:
         return ""
     s = unicodedata.normalize("NFC", s)
+    s = _NONCHAR_RE.sub("", s)
     s = s.replace("\r\n", "\n").replace("\r", "\n")
+    if keep_newlines:
+        s = s.expandtabs(4)
     s = _DROP_RE.sub("", s)
     out = []
     for ch in s:
@@ -200,7 +211,7 @@ def clean_text(s: str, *, keep_newlines: bool = False) -> str:
         out.append(ch)
     s = "".join(out)
     if keep_newlines:
-        lines = [_WS_RE.sub(" ", ln).rstrip() for ln in s.split("\n")]
+        lines = [ln.rstrip() for ln in s.split("\n")]
         # strip leading/trailing blank lines
         while lines and not lines[0].strip():
             lines.pop(0)

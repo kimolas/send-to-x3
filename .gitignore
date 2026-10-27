@@ -7,3 +7,5 @@ __pycache__/
 e2e/work/
 *.egg-info/
 .DS_Store
+.mypy_cache/
+.ruff_cache/

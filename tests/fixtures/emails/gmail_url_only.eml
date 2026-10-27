@@ -1,0 +1,35 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: =?UTF-8?Q?Reading_on_e-ink_=E2=80=94_a_long_read?=
+Message-ID: <CAF0001@mail.gmail.com>
+Content-Type: multipart/alternative; boundary="000000000000a1b2"
+
+--000000000000a1b2
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+https://news.example.com/2026/10/25/a-very-long-article-slug-about-reading-=
+on-e-ink-devices?utm_source=3Dshare&utm_medium=3Dios_app&ref=3Dreadlater
+
+Sent from my iPhone
+
+--000000000000a1b2
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr"><a href=3D"https://news.example.com/2026/10/25/a-very-long=
+-article-slug-about-reading-on-e-ink-devices?utm_source=3Dshare&amp;utm_med=
+ium=3Dios_app&amp;ref=3Dreadlater">https://news.example.com/2026/10/25/a-ve=
+ry-long-article-slug-about-reading-on-e-ink-devices?utm_source=3Dshare&amp;=
+utm_medium=3Dios_app&amp;ref=3Dreadlater</a><br><br><div dir=3D"ltr">Sent f=
+rom my iPhone</div></div>
+
+--000000000000a1b2--

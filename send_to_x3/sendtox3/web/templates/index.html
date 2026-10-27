@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Queue{% endblock %}
+{% block content %}
+{% for w in warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+
+<div class="grid">
+  <section class="card">
+    <h2>Send something</h2>
+    <form method="post" action="{{ base }}/admin/send">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="content">Text or a link</label>
+      <textarea id="content" name="content" rows="5" placeholder="Paste an article link or some text" required></textarea>
+      <label for="title">Title <span class="muted">(optional)</span></label>
+      <input id="title" name="title" type="text" maxlength="300">
+      <button type="submit">Send to X3</button>
+    </form>
+    <form method="post" action="{{ base }}/admin/upload" enctype="multipart/form-data" class="upload">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="file">Or upload a file <span class="muted">(PDF, TXT, HTML or EPUB, up to {{ max_upload_mb }} MB)</span></label>
+      <input id="file" name="file" type="file" accept=".pdf,.txt,.html,.htm,.epub,application/pdf,application/epub+zip,text/plain,text/html" required>
+      <button type="submit">Upload</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Channels</h2>
+    <table class="channels">
+      {% for ch in channels %}
+      <tr>
+        <td>{{ ch.label }}</td>
+        <td><span class="badge state-{{ ch.state }}">{{ ch.state }}</span></td>
+        <td class="muted">{{ ch.detail }}{% if ch.updated %} <span class="when">({{ ch.updated|ts }})</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if deliveries %}
+    <h3>Recent automatic deliveries</h3>
+    <ul class="plain">
+      {% for d in deliveries %}
+      <li>{{ d.created_at|ts }}: {{ d.item_ids|length }} item{{ "s" if d.item_ids|length != 1 else "" }}{% if d.hits > 1 %} <span class="badge state-warning">requested {{ d.hits }}×</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>Queue <span class="muted">{{ total }} item{{ "s" if total != 1 else "" }}, {{ pending }} not yet on the X3</span></h2>
+  {% if not items %}
+  <p class="muted">Nothing here yet. Share something from your phone, or use the form above. The <a href="{{ base }}/admin/setup">Setup</a> page explains how.</p>
+  {% else %}
+  <div class="scroll">
+  <table class="queue">
+    <thead><tr><th>Title</th><th>Added</th><th>Status</th><th>On the X3</th><th></th></tr></thead>
+    <tbody>
+    {% for it in items %}
+    <tr>
+      <td class="title">
+        <a href="{{ base }}/admin/items/{{ it.id }}">{{ it.title }}</a>
+        <div class="muted small">{{ it.kind }} · {{ it.source }}{% if it.word_count %} · {{ "{:,}".format(it.word_count) }} words{% endif %}</div>
+      </td>
+      <td class="nowrap">{{ it.created_at|ts }}</td>
+      <td>
+        <span class="badge status-{{ it.status }}">{{ it.status }}</span>
+        {% if it.error %}<div class="muted small">{{ it.error }}</div>{% endif %}
+      </td>
+      <td>
+        {% if it.delivered %}
+          {% for ch, when in it.delivered|dictsort %}<span class="badge delivered" title="{{ when|ts }}">{{ ch }} {{ when|ts }}</span> {% endfor %}
+        {% else %}
+          <span class="badge pending">waiting</span>
+        {% endif %}
+      </td>
+      <td class="actions">
+        {% if it.delivered %}
+        <form class="inline" method="post" action="{{ base }}/admin/items/{{ it.id }}/requeue">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button type="submit" class="small" title="Deliver again">Requeue</button>
+        </form>
+        {% endif %}
+        <form class="inline" method="post" action="{{ base }}/admin/items/{{ it.id }}/delete" data-confirm="Delete this item?">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button type="submit" class="small danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page > 1 %}<a href="{{ base }}/admin?page={{ page - 1 }}">« Newer</a>{% endif %}
+    <span>Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}<a href="{{ base }}/admin?page={{ page + 1 }}">Older »</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

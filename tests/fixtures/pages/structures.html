@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!-- Synthetic test fixture written for Send to X3 (CC0). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Building a tide clock from spare parts - Tinkerer's Notebook</title>
+<meta property="og:site_name" content="Tinkerer's Notebook">
+<meta name="author" content="R. Pennywhistle">
+</head>
+<body>
+<div class="nav"><a href="/">Home</a> | <a href="/archive">Archive</a> | <a href="/about">About</a></div>
+<article class="post">
+<h1>Building a tide clock from spare parts</h1>
+<p>A tide clock shows how far the sea is through its cycle instead of the hour of the day. Mine is built from an old quartz movement, a slowed-down gear train and a hand-painted dial. This post walks through the parts, the wiring and the small program that keeps it honest.</p>
+<h2>Parts list</h2>
+<ol>
+  <li>A quartz clock movement with a seconds output</li>
+  <li>A gear train with these stages:
+    <ul>
+      <li>a 12:1 reduction from the movement</li>
+      <li>a 1.035:1 correction stage</li>
+    </ul>
+  </li>
+  <li>A dial painted with high and low water marks</li>
+</ol>
+<p>The correction stage is the only tricky part. Lunar tides repeat roughly every twelve hours and twenty-five minutes, so an ordinary clock drifts by almost an hour a day.</p>
+<h2>The control program</h2>
+<p>The microcontroller pulses the movement with <code>pulse_coil()</code> once per adjusted second and stores the offset in <code>EEPROM</code> so a power cut does not lose the phase.</p>
+<pre><code>def adjusted_seconds(now):
+    period = 44714  # seconds in a mean tidal cycle
+    return (now * 43200) // period
+
+while True:
+    pulse_coil()
+</code></pre>
+<p>Calibration takes one high tide: set the hand to the top of the dial when the water is at its highest and press the button.</p>
+<h3>Measured drift</h3>
+<table>
+  <tr><th>Week</th><th>Drift (minutes)</th></tr>
+  <tr><td>1</td><td>2</td></tr>
+  <tr><td>2</td><td>3</td></tr>
+  <tr><td>3</td><td>1</td></tr>
+</table>
+<p>The drift stays within a few minutes, which is far better than the tide tables can promise for a small harbour anyway.</p>
+<hr>
+<h2>A verse for the dial</h2>
+<p>Time and tide wait for no one,<br>but the clock will wait for both,<br>and the sea will keep its own count.</p>
+<p>That rhyme is now painted around the edge of the dial, in letters small enough that visitors have to lean in to read it, which is rather the point of a clock that only tells you about the sea.</p>
+</article>
+<div class="comments"><h3>2 comments</h3><p>Great build! — Anonymous</p></div>
+</body>
+</html>

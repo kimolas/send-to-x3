@@ -1,0 +1,67 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Fwd: Notes from the =?UTF-8?Q?caf=C3=A9?=
+Message-ID: <CAF0002@mail.gmail.com>
+Content-Type: multipart/alternative; boundary="000000000000c3d4"
+
+--000000000000c3d4
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Thought you'd like this.
+
+--
+Qiong Example
+Product Notes Weekly
+
+---------- Forwarded message ---------
+From: Alice Writer <alice@example.net>
+Date: Fri, Oct 23, 2026 at 5:12 PM
+Subject: Notes from the caf=C3=A9
+To: Qiong Example <qiong@example.org>
+
+
+Here are my notes from Thursday=E2=80=99s session at the caf=C3=A9. We talk=
+ed about how
+long-form reading works on small screens, and why paragraphs matter more th=
+an
+pictures for this kind of device.
+
+The second point was about na=C3=AFve layout engines: they re-measure every=
+ line,
+so very long paragraphs get slow. Short paragraphs are kinder.
+
+--
+Alice Writer
+Senior Researcher | Example Labs
+
+--000000000000c3d4
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+<div dir=3D"ltr">Thought you'd like this.<br clear=3D"all"><br><span class=
+=3D"gmail_signature_prefix">-- </span><br><div dir=3D"ltr" class=3D"gmail_s=
+ignature" data-smartmail=3D"gmail_signature">Qiong Example<br>Product Notes=
+ Weekly</div><br><div class=3D"gmail_quote"><div dir=3D"ltr" class=3D"gmail=
+_attr">---------- Forwarded message ---------<br>From: <strong class=3D"gma=
+il_sendername" dir=3D"auto">Alice Writer</strong> <span dir=3D"auto">&lt;<a=
+ href=3D"mailto:alice@example.net">alice@example.net</a>&gt;</span><br>Date=
+: Fri, Oct 23, 2026 at 5:12 PM<br>Subject: Notes from the caf=C3=A9<br>To: =
+Qiong Example &lt;<a href=3D"mailto:qiong@example.org">qiong@example.org</a=
+>&gt;<br></div><br><br><div dir=3D"ltr"><p>Here are my notes from Thursday=
+=E2=80=99s session at the caf=C3=A9. We talked about how long-form reading =
+works on small screens, and why paragraphs matter more than pictures for th=
+is kind of device.</p><p>The second point was about na=C3=AFve layout engin=
+es: they re-measure every line, so very long paragraphs get slow. Short par=
+agraphs are kinder.</p><p>-- <br>Alice Writer<br>Senior Researcher | Exampl=
+e Labs</p></div></div></div>
+
+--000000000000c3d4--

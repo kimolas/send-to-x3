@@ -1,0 +1,89 @@
+{
+  "version": 92,
+  "compatibilityVersion": 90,
+  "categories": [
+    {
+      "id": "63aa7144-2f7c-4ce4-9f17-8b0b2514bed4",
+      "name": "Send to X3",
+      "layoutType": "linear_list",
+      "shortcuts": [
+        {
+          "id": "d4dec544-b444-49ab-b184-3c87e05c707c",
+          "name": "Send to X3",
+          "description": "Share text or a link to read it on the Xteink X3",
+          "executionType": "app",
+          "iconName": "flat_color_booklet",
+          "method": "POST",
+          "url": "{{e205e4e1-d774-4892-a1d8-a3bb8364a817}}",
+          "headers": [
+            {
+              "key": "Authorization",
+              "value": "Bearer {{d10a0744-bd6f-4355-9a9a-c4863081baf2}}"
+            }
+          ],
+          "requestBodyType": "custom_text",
+          "contentType": "application/json",
+          "bodyContent": "{\"text\": \"{{7af860dd-555d-4d1b-a087-6d0f186ca4c2}}\", \"title\": \"{{46437425-5613-436b-a61a-c5b805f8cd43}}\", \"source\": \"android-http-shortcuts\"}",
+          "timeout": 30000,
+          "waitForInternet": true,
+          "acceptCookies": false,
+          "launcherShortcut": true,
+          "excludeFromFileSharing": true,
+          "responseHandling": {
+            "uiType": "toast",
+            "successOutput": "none",
+            "failureOutput": "none"
+          },
+          "codeOnPrepare": "// Send to X3: stop early with a clear message when the settings are missing.\nif (!getVariable('sendtox3_url') || !getVariable('sendtox3_token')) {\n  showDialog('Open HTTP Shortcuts, menu > Global Variables, and fill in sendtox3_url (the ingest address) and '\n    + 'sendtox3_token (the ingest token) from the Setup page of the Send to X3 app.', 'Send to X3 is not set up');\n  abort();\n}\n",
+          "codeOnSuccess": "// Show the title the Send to X3 app saved (\"Sent to X3: <title>\"). Anything that is\n// not its JSON answer (a login page, another server) counts as a failure.\nlet reply = null;\ntry {\n  reply = JSON.parse(response.body);\n} catch (e) {}\nif (!reply || reply.ok !== true) {\n  abortAndTreatAsFailure('not a Send to X3 answer');\n}\nshowToast(reply.message || 'Sent to X3');\n",
+          "codeOnFailure": "// The shared values are JSON-encoded (see the variables); undo that for the email.\nfunction plain(value) {\n  try {\n    return JSON.parse('\"' + value + '\"');\n  } catch (e) {\n    return value;\n  }\n}\nif (response) {\n  // The app answered with an error (wrong token, nothing to send, ...), or something\n  // else answered at that address.\n  let error = null;\n  try {\n    error = JSON.parse(response.body).error;\n  } catch (e) {}\n  if (!error) {\n    error = 'The address answered HTTP ' + response.statusCode\n      + ' but is not the Send to X3 ingest address. Check sendtox3_url in Global Variables.';\n  }\n  showDialog(htmlEncode(error), 'Send to X3: not saved');\n} else {\n  // No answer at all: probably not on the home Wi-Fi. Fall back to email, if set up.\n  const to = getVariable('sendtox3_email');\n  if (to) {\n    const title = plain(getVariable('sendtox3_title'));\n    const text = plain(getVariable('sendtox3_text'));\n    openUrl('mailto:' + to + '?subject=' + encodeURIComponent('[x3] ' + title)\n      + '&body=' + encodeURIComponent(text));\n  } else {\n    showDialog(htmlEncode('Could not reach the Send to X3 app (' + networkError + '). '\n      + 'Are you on your home Wi-Fi? To send from anywhere, set sendtox3_email in Global Variables.'), 'Send to X3');\n  }\n}\n"
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "id": "e205e4e1-d774-4892-a1d8-a3bb8364a817",
+      "key": "sendtox3_url",
+      "type": "constant",
+      "value": "",
+      "title": "Send to X3 ingest address, like http://192.168.1.50:8765/api/v1/ingest",
+      "isExcludeValueFromExport": true
+    },
+    {
+      "id": "d10a0744-bd6f-4355-9a9a-c4863081baf2",
+      "key": "sendtox3_token",
+      "type": "constant",
+      "value": "",
+      "title": "Send to X3 ingest token",
+      "isExcludeValueFromExport": true
+    },
+    {
+      "id": "cca6ee70-c7d9-47f2-adf9-e58893e4ef77",
+      "key": "sendtox3_email",
+      "type": "constant",
+      "value": "",
+      "title": "Optional: address the Send to X3 app reads, for sending when away from home",
+      "isExcludeValueFromExport": true
+    },
+    {
+      "id": "7af860dd-555d-4d1b-a087-6d0f186ca4c2",
+      "key": "sendtox3_text",
+      "type": "text",
+      "value": "",
+      "jsonEncode": true,
+      "isShareText": true,
+      "isMultiline": true,
+      "title": "Send to X3",
+      "message": "Text or link to send to the X3"
+    },
+    {
+      "id": "46437425-5613-436b-a61a-c5b805f8cd43",
+      "key": "sendtox3_title",
+      "type": "constant",
+      "value": "",
+      "jsonEncode": true,
+      "isShareTitle": true
+    }
+  ]
+}

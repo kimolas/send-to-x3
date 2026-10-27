@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ heading }}</h1>
+  {% if lines %}
+  <pre class="log">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  {% endif %}
+  <p><a href="{{ base }}/admin">Back to the queue</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,15 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Authentication-Results: mx.google.com;
+       spf=fail (google.com: domain of qiong@example.org does not designate 203.0.113.9 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=fail (p=REJECT sp=REJECT dis=QUARANTINE) header.from=example.org
+Received: from evil.example (evil.example [203.0.113.9]) by mx.google.com; Sun, 25 Oct 2026 06:00:00 -0700
+Authentication-Results: mx.google.com; dkim=pass header.i=@example.org; dmarc=pass header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Totally legit
+Message-ID: <forged-0017@evil.example>
+Content-Type: text/plain; charset=utf-8
+
+Please read https://phish.example/login now.

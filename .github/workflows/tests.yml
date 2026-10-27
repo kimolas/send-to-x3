@@ -1,0 +1,103 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+  # Not a project dependency; lets tests/test_packaging.py cross-check its YAML parser.
+  PYYAML_VERSION: "6.0.3"
+
+jobs:
+  pytest:
+    name: Unit and integration tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            send_to_x3/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check "PyYAML==${PYYAML_VERSION}"
+
+      - name: Run pytest
+        run: python -m pytest -q -ra
+
+  app-config:
+    name: Validate the app with the Supervisor
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate config.yaml, options and translations
+        env:
+          WORK_DIR: ${{ runner.temp }}/sendtox3-ha
+          PYTHON: python
+        run: bash e2e/ha/validate_config.sh
+
+      - name: Check shell scripts
+        run: shellcheck --shell=bash send_to_x3/run.sh e2e/ha/*.sh
+
+  image:
+    name: Image smoke test (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-24.04
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            send_to_x3/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Build and run the image
+        env:
+          SENDTOX3_DOCKER_TESTS: "1"
+        run: python -m pytest -q -ra tests/test_packaging_docker.py

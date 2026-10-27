@@ -1,0 +1,29 @@
+<div id="readme" class="md" data-path="README.md"><article class="markdown-body entry-content container-lg" itemprop="text"><div class="markdown-heading" dir="auto"><h1 class="heading-element" dir="auto">Tidewatch</h1><a id="user-content-tidewatch" class="anchor" aria-label="Permalink: Tidewatch" href="#tidewatch"><svg class="octicon octicon-link" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m7.775 3.275 1.25-1.25"></path></svg></a></div>
+<p dir="auto"><a href="https://example.org/ci"><img src="https://camo.example/badge.svg" alt="CI status" style="max-width: 100%;"></a></p>
+<p dir="auto">Tidewatch is a small command-line tool that prints the next high and low water times for a harbour. It is a synthetic README written for the Send to X3 test suite.</p>
+<div class="markdown-heading" dir="auto"><h2 class="heading-element" dir="auto">Installation</h2><a id="user-content-installation" class="anchor" aria-label="Permalink: Installation" href="#installation"><svg class="octicon octicon-link" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m7.775 3.275"></path></svg></a></div>
+<div class="highlight highlight-source-shell notranslate position-relative overflow-auto" dir="auto"><pre>pip install tidewatch
+tidewatch --harbour <span class="pl-s"><span class="pl-pds">"</span>Gull Rock<span class="pl-pds">"</span></span></pre><div class="zeroclipboard-container"><clipboard-copy aria-label="Copy" class="ClipboardButton btn" data-copy-feedback="Copied!" value="pip install tidewatch" tabindex="0" role="button"><svg aria-hidden="true" class="octicon octicon-copy" viewBox="0 0 16 16"><path d="M0 6.75"></path></svg></clipboard-copy></div></div>
+<div class="markdown-heading" dir="auto"><h2 class="heading-element" dir="auto">Configuration</h2><a id="user-content-configuration" class="anchor" href="#configuration"><svg class="octicon octicon-link" viewBox="0 0 16 16"><path d="m7"></path></svg></a></div>
+<p dir="auto">Settings live in <code>~/.config/tidewatch.toml</code>:</p>
+<div class="highlight highlight-source-toml notranslate position-relative overflow-auto" dir="auto"><pre>[harbour]
+name = <span class="pl-s">"Gull Rock"</span>
+    offset_minutes = <span class="pl-c1">12</span></pre></div>
+<markdown-accessiblity-table><table>
+<thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+<tbody><tr><td><code>name</code></td><td>Harbour to report</td></tr><tr><td><code>offset_minutes</code></td><td>Local correction</td></tr></tbody>
+</table></markdown-accessiblity-table>
+<div class="markdown-heading" dir="auto"><h3 class="heading-element" dir="auto">Supported harbours</h3><a id="user-content-supported-harbours" class="anchor" href="#supported-harbours"><svg class="octicon octicon-link" viewBox="0 0 16 16"><path d="m7"></path></svg></a></div>
+<ul dir="auto">
+<li>Gull Rock</li>
+<li>Saltmarsh Quay
+<ul dir="auto">
+<li>inner basin</li>
+<li>outer basin</li>
+</ul>
+</li>
+</ul>
+<details><summary>Changelog</summary>
+<p dir="auto">Version 0.2 added the offset option.</p>
+</details>
+</article></div>

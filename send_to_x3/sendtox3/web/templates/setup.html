@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Setup</h1>
+  {% if base_url %}
+  <p>The X3 and your phone reach this app at <code>{{ base_url }}</code>
+     <span class="muted">({% if base_url_source == "options" %}from the server_host option{% elif base_url_source == "supervisor" %}detected from Home Assistant{% else %}detected from this machine's address{% endif %})</span>.</p>
+  {% if base_url_internal == "docker" %}
+  <div class="flash warning">That looks like an address inside Docker, which the X3 cannot reach. Set
+    <code>server_host</code> in the app options to the LAN IP address of your Home Assistant machine.</div>
+  {% elif base_url_internal == "maybe" %}
+  <div class="flash warning">If this app runs in a Docker container, that is an address inside Docker which the X3
+    cannot reach: set <code>server_host</code> in the app options to the LAN IP address of the machine that runs it.
+    If your home network really uses 172.16-172.31 addresses, ignore this.</div>
+  {% endif %}
+  {% elif base_url_source == "invalid server_host" %}
+  <div class="flash error">The <code>server_host</code> option (<code>{{ opts.server_host }}</code>) is not a usable
+    address. Set it to the LAN IP address of your Home Assistant machine, optionally with a port (for example
+    192.168.1.50 or 192.168.1.50:8765), then restart the app.</div>
+  {% else %}
+  <div class="flash error">The server address could not be detected. Set <code>server_host</code> in the app
+    options to the LAN IP address of your Home Assistant machine (for example 192.168.1.50), then restart the app.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Tokens</h2>
+  <p class="muted">Keep these private. To change one, set it in the app options and restart; then re-install the plugin and update your shortcuts.</p>
+  <table class="tokens">
+    {% for label, key, value, hint in tokens %}
+    <tr>
+      <th>{{ label }}</th>
+      <td><code id="tok-{{ key }}" class="secret">{{ value }}</code> <button type="button" class="small copy" data-copy="tok-{{ key }}">Copy</button>
+        <div class="muted small">{{ hint }}</div></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if device_token_problem %}
+  <div class="flash warning">The device token from the app options cannot be used by the X3 plugin: {{ device_token_problem }}.
+    Choose one with letters, digits and punctuation only, then restart the app.</div>
+  {% endif %}
+  <p class="muted">The device token is written into <code>device.json</code> on the X3's SD card, and while the X3's
+     File Transfer screen is open any device on your Wi-Fi can read that file from it. It opens the plugin catalog and
+     the OPDS feed (everything in the queue). If it may have leaked, replace it.</p>
+  {% if device_token_rotatable %}
+  <form method="post" action="{{ base }}/admin/rotate-device-token" class="row"
+        data-confirm="Replace the device token? The X3 needs the plugin installed again (and a new OPDS password).">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="rotate_host" class="sr">X3 address</label>
+    <input id="rotate_host" name="device_host" type="text" placeholder="X3 address in File Transfer > Join a Network (optional)" value="{{ opts.device_host }}">
+    <button type="submit" class="small">New device token</button>
+  </form>
+  <p class="muted small">With the X3's address (File Transfer &gt; Join a Network open) the plugin is reinstalled right away.</p>
+  {% else %}
+  <p class="muted small">To replace it, change <code>device_token</code> in the app options and restart, then install the plugin again.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>X3 with CrossPoint 2.x: the Send to X3 plugin</h2>
+  <p>Gives you a catalog of everything you shared (Home &gt; Plugins &gt; Send to X3){% if opts.auto_delivery %} and delivers
+     new reading automatically when the X3 goes to sleep on your home Wi-Fi{% endif %}.</p>
+  {% if opts.auto_delivery %}
+  <p class="muted">Delivery at sleep needs a CrossPoint build newer than 2.0.0rc (with the fix "Load WiFi settings from
+     file before sleep mode", develop commit facaa87). On 2.0.0rc new items arrive the next time the X3 joins Wi-Fi
+     instead: opening Home &gt; Plugins &gt; Send to X3, OPDS, File Transfer &gt; Join a Network or KOReader sync (or a
+     sleep taken while Wi-Fi is still on).</p>
+  {% endif %}
+  {% if bundle_problem and base_url %}
+  <div class="flash error">The plugin cannot be installed yet: {{ bundle_problem }}</div>
+  {% endif %}
+  <h3>Install over Wi-Fi</h3>
+  <ol>
+    <li>On the X3 open File Transfer &gt; Join a Network and keep that screen open. Note the IP address it shows.</li>
+    <li>Enter that address and press Install.</li>
+  </ol>
+  <form method="post" action="{{ base }}/admin/install-plugin" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="device_host" class="sr">X3 address</label>
+    <input id="device_host" name="device_host" type="text" placeholder="192.168.1.60" value="{{ install_host|default(opts.device_host) }}" required>
+    <button type="submit" {% if bundle_problem %}disabled{% endif %}>Install plugin on my X3 now</button>
+  </form>
+  {% if install_lines %}
+  <pre class="log">{% for line in install_lines %}{{ line }}
+{% endfor %}</pre>
+  {% endif %}
+  <h3>Or copy it to the SD card</h3>
+  <p><a class="button" href="{{ base }}/admin/plugin-bundle.zip" {% if bundle_problem %}aria-disabled="true"{% endif %}>Download SD-card plugin bundle (zip)</a></p>
+  <ol>
+    <li>Unzip it at the top level of the X3's SD card. It contains the hidden folder <code>.crosspoint/plugins/sendtox3</code>
+        and an <code>{{ opts.inbox_folder }}</code> folder. On a Mac, Finder hides folders starting with a dot; use
+        <code>unzip -o sendtox3-sd-card.zip -d /Volumes/&lt;card&gt;</code> in Terminal.</li>
+    <li>On the X3 turn on Settings &gt; Connectivity &gt; Plugins (it is off by default).</li>
+    <li>Open Home &gt; Plugins &gt; Send to X3.</li>
+  </ol>
+  <p class="muted">The bundle contains this server's address and the device token. Download it again if either changes.</p>
+</section>
+
+<section class="card">
+  <h2>X3 with CrossPoint 1.6.5: OPDS</h2>
+  <div class="qrrow">
+    {% if qr %}<figure>{{ qr.opds_url|safe }}<figcaption>OPDS address</figcaption></figure>{% endif %}
+    <div>
+      <p>In the X3's OPDS settings add a server:</p>
+      <table class="kv">
+        <tr><th>Address</th><td><code id="opds-url">{{ opds_url or "(unknown)" }}</code> <button type="button" class="small copy" data-copy="opds-url">Copy</button></td></tr>
+        <tr><th>User name</th><td><code>x3</code></td></tr>
+        <tr><th>Password</th><td>the device token above</td></tr>
+      </table>
+      <p>Then open the OPDS browser on the X3 to download items (newest first).</p>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>iPhone and iPad: share sheet shortcut</h2>
+  <p class="muted">{{ ios_shortcut_note }}</p>
+  <div class="qrrow">
+    {% if qr %}
+    <figure>{{ qr.ingest_url|safe }}<figcaption>Ingest address</figcaption></figure>
+    <figure>{{ qr.ingest_token|safe }}<figcaption>Ingest token</figcaption></figure>
+    {% endif %}
+    <div>
+      <table class="kv">
+        <tr><th>Address</th><td><code id="ingest-url">{{ ingest_url or "(unknown)" }}</code> <button type="button" class="small copy" data-copy="ingest-url">Copy</button></td></tr>
+        <tr><th>Header</th><td><code>Authorization: Bearer &lt;ingest token&gt;</code></td></tr>
+      </table>
+      <p>To build the shortcut yourself in the Shortcuts app:</p>
+      <ol>
+        <li>New shortcut. In its details turn on Show in Share Sheet and accept Text, URLs, Safari web pages and Rich text.</li>
+        <li>Add Get Contents of URL with the address above, method POST, a header <code>Authorization</code> with the value
+            <code>Bearer</code>, a space and the ingest token, and a JSON request body with a text field <code>text</code> set to Shortcut Input.</li>
+        <li>Add Get Dictionary Value for the key <code>message</code>, then Show Notification with that value.</li>
+      </ol>
+      <p class="muted">This works on your home Wi-Fi. Away from home, send an email instead (below).</p>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Android, computers and scripts</h2>
+  <p>On Android, install HTTP Shortcuts, then import this file (menu &gt; Import / Export &gt; Import from File). It already
+     contains this server's address and the ingest token, so keep it private.</p>
+  <p><a class="button" href="{{ base }}/admin/setup/android.json" {% if bundle_problem %}aria-disabled="true"{% endif %}>Download HTTP Shortcuts file</a></p>
+  <p>Any app that can send an HTTP request works too (method POST, the address above, the Authorization header, a
+     form body with a field <code>text</code> holding the shared text).</p>
+  <pre class="log">curl -H "Authorization: Bearer &lt;ingest token&gt;" --data-urlencode "text=https://example.com/article" {{ ingest_url or "http://<server>:" ~ opts.port ~ "/api/v1/ingest" }}</pre>
+  <p>Fields: <code>url</code>, <code>text</code>, <code>title</code>, <code>html</code>, <code>kind</code> (auto, url, text, html),
+     or a file part named <code>file</code> (PDF, TXT, HTML, EPUB).</p>
+</section>
+
+<section class="card">
+  <h2>Email</h2>
+  {% if opts.imap_enabled %}
+  <p>Send or forward mail to <code>{{ email_address }}</code>. The body text, links in it and PDF, TXT and HTML
+     attachments become items.{% if opts.allowed_senders %} Only these senders are accepted: {{ opts.allowed_senders|join(", ") }}.{% endif %}</p>
+  {% else %}
+  <p class="muted">Email ingest is off. Set <code>imap_enabled</code> and the IMAP options (a dedicated Gmail account with an
+     app password works well) to send things from anywhere.</p>
+  {% endif %}
+</section>
+{% endblock %}

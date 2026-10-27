@@ -1,0 +1,22 @@
+{"thread":{"$type":"app.bsky.feed.defs#threadViewPost",
+ "post":{"uri":"at://did:plc:testtidewatch000000000001/app.bsky.feed.post/3abcroot0001","cid":"bafyroot",
+  "author":{"did":"did:plc:testtidewatch000000000001","handle":"tidewatch.example.social","displayName":"Tide Watcher 🌊"},
+  "record":{"$type":"app.bsky.feed.post","createdAt":"2026-10-20T07:15:00.000Z","langs":["en"],
+   "text":"Spring tide this morning at Gull Rock: the water came right up to the old keepers' steps.\n\nA short thread on why that happens 🧵"},
+  "embed":{"$type":"app.bsky.embed.recordWithMedia#view",
+   "media":{"$type":"app.bsky.embed.images#view","images":[{"thumb":"https://cdn.example/t.jpg","fullsize":"https://cdn.example/f.jpg","alt":"Waves reaching the bottom step of a stone stair"},{"thumb":"https://cdn.example/t2.jpg","fullsize":"https://cdn.example/f2.jpg","alt":""}]},
+   "record":{"record":{"$type":"app.bsky.embed.record#viewRecord","uri":"at://did:plc:other/app.bsky.feed.post/q1","author":{"did":"did:plc:other","handle":"harbourmaster.example.social","displayName":"Harbour Master"},"value":{"$type":"app.bsky.feed.post","text":"Highest tide of the year expected on Monday.","createdAt":"2026-10-18T10:00:00.000Z"}}}},
+  "indexedAt":"2026-10-20T07:15:01.000Z"},
+ "replies":[
+  {"$type":"app.bsky.feed.defs#threadViewPost","post":{"uri":"at://did:plc:other2/app.bsky.feed.post/r9","author":{"did":"did:plc:other2","handle":"someone.example.social","displayName":"Someone Else"},
+    "record":{"$type":"app.bsky.feed.post","createdAt":"2026-10-20T07:20:00.000Z","text":"Great photo!"},"indexedAt":"2026-10-20T07:20:00.000Z"},"replies":[]},
+  {"$type":"app.bsky.feed.defs#threadViewPost","post":{"uri":"at://did:plc:testtidewatch000000000001/app.bsky.feed.post/3abcrep0002","author":{"did":"did:plc:testtidewatch000000000001","handle":"tidewatch.example.social","displayName":"Tide Watcher 🌊"},
+    "record":{"$type":"app.bsky.feed.post","createdAt":"2026-10-20T07:17:00.000Z","text":"Spring tides happen when the sun and moon line up, a little after every new and full moon."},
+    "embed":{"$type":"app.bsky.embed.external#view","external":{"uri":"https://example.org/tides","title":"How tides work","description":"An explainer"}},
+    "indexedAt":"2026-10-20T07:17:00.000Z"},
+   "replies":[
+    {"$type":"app.bsky.feed.defs#threadViewPost","post":{"uri":"at://did:plc:testtidewatch000000000001/app.bsky.feed.post/3abcrep0003","author":{"did":"did:plc:testtidewatch000000000001","handle":"tidewatch.example.social","displayName":"Tide Watcher 🌊"},
+      "record":{"$type":"app.bsky.feed.post","createdAt":"2026-10-20T07:19:00.000Z","text":"Add an onshore wind and the steps get wet. End of thread."},"indexedAt":"2026-10-20T07:19:00.000Z"},"replies":[]}
+   ]}
+ ]},
+ "threadgate":null}

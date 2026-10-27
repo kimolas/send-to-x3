@@ -1,0 +1,37 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Fwd: Weekly digest
+Message-ID: <fwd-attach-0006@example.org>
+Content-Type: multipart/mixed; boundary="XYZ0006"
+
+--XYZ0006
+Content-Type: text/plain; charset=us-ascii
+
+see attached
+
+--XYZ0006
+Content-Type: message/rfc822
+Content-Disposition: attachment; filename="Weekly digest.eml"
+
+From: Example Newsletter <news@example.net>
+To: qiong@example.org
+Subject: Weekly digest #42
+Date: Sat, 24 Oct 2026 08:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><table><tr><td><a href="https://example.net/view?utm_source=newsletter&amp;utm_medium=email">View in browser</a></td></tr>
+<tr><td><h1>Weekly digest</h1><p>This week we look at three essays about attention, each with a short summary and a link to the full text.</p>
+<ul><li>On boredom, by an anonymous reader</li><li>The quiet screen</li><li>Paragraphs as places</li></ul><p>Read more: <a href="https://news.example.com/story?id=7&amp;utm_campaign=x&amp;fbclid=IwAR0">the full story</a></p>
+<img src="https://example.net/pixel.gif?uid=1" width="1" height="1"></td></tr>
+<tr><td style="font-size:10px">You received this because you subscribed. <a href="https://example.net/unsub">Unsubscribe</a></td></tr></table></body></html>
+
+--XYZ0006--

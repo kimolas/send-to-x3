@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ item.title }}</h1>
+  <dl class="meta">
+    <dt>Status</dt><dd><span class="badge status-{{ item.status }}">{{ item.status }}</span>{% if item.error %} {{ item.error }}{% endif %}</dd>
+    <dt>Added</dt><dd>{{ item.created_at|ts }} via {{ item.source }} ({{ item.kind }})</dd>
+    {% if item.byline %}<dt>By</dt><dd>{{ item.byline }}</dd>{% endif %}
+    {% if item.site %}<dt>Site</dt><dd>{{ item.site }}</dd>{% endif %}
+    {% if item.source_url %}<dt>Link</dt><dd class="break">{{ item.source_url }}</dd>{% endif %}
+    <dt>Words</dt><dd>{{ "{:,}".format(item.word_count) }}</dd>
+    <dt>On the X3</dt>
+    <dd>
+      {% if item.delivered %}
+        {% for ch, when in item.delivered|dictsort %}<span class="badge delivered">{{ ch }} {{ when|ts }}</span> {% endfor %}
+      {% else %}<span class="badge pending">waiting</span>{% endif %}
+    </dd>
+    <dt>Files</dt>
+    <dd>
+      <a href="{{ base }}/admin/items/{{ item.id }}/download/epub">EPUB</a> ({{ sizes.epub|size }}) ·
+      <a href="{{ base }}/admin/items/{{ item.id }}/download/txt">TXT</a> ({{ sizes.txt|size }})
+    </dd>
+  </dl>
+  <div class="buttons">
+    <form class="inline" method="post" action="{{ base }}/admin/items/{{ item.id }}/requeue">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">Deliver again</button>
+    </form>
+    <form class="inline" method="post" action="{{ base }}/admin/items/{{ item.id }}/delete" data-confirm="Delete this item?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
+</section>
+<section class="card">
+  <h2>Preview <span class="muted">(the text file as the X3 shows it)</span></h2>
+  {% if preview %}
+  <pre class="preview">{{ preview }}</pre>
+  {% if truncated %}<p class="muted">The preview is cut short; download the TXT file for the rest.</p>{% endif %}
+  {% else %}
+  <p class="muted">No preview available.</p>
+  {% endif %}
+</section>
+{% endblock %}

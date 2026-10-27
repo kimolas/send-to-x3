@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Sign in</h1>
+  <p>Enter the admin token. In Home Assistant, open this app from the sidebar instead: no token is needed there,
+     and its Setup page shows the token.</p>
+  <form method="post" action="{{ base }}/admin/login">
+    <label for="token">Admin token</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required autofocus>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

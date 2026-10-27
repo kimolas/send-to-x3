@@ -1,0 +1,157 @@
+# Build the app image for aarch64 and amd64 with the Home Assistant builder
+# actions, and on main publish it to GHCR:
+#
+#   ghcr.io/<owner>/aarch64-send-to-x3:<version>   per-arch images
+#   ghcr.io/<owner>/amd64-send-to-x3:<version>
+#   ghcr.io/<owner>/send-to-x3:<version>           multi-arch manifest (use this in config.yaml)
+#
+# Pull requests only build (and smoke-test) the images. An existing version is
+# never re-pushed: bump `version` in send_to_x3/config.yaml to publish. After the
+# first publish, make the GHCR package public, then uncomment `image:` in
+# config.yaml so Home Assistant pulls instead of building on the device.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "send_to_x3/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - "send_to_x3/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  APP_DIR: send_to_x3
+  IMAGE_NAME: send-to-x3
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      architectures: ${{ steps.info.outputs.architectures }}
+      version: ${{ steps.info.outputs.version }}
+      registry_prefix: ${{ steps.info.outputs.registry_prefix }}
+      publish: ${{ steps.info.outputs.publish }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read app information
+        id: info
+        env:
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          GIT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          config="${APP_DIR}/config.yaml"
+          version="$(yq e -N -M '.version' "${config}")"
+          archs="$(yq e -N -M '.arch' -o=json -I=0 "${config}")"
+          if [[ -z "${version}" || "${version}" == "null" ]]; then
+            echo "::error file=${config}::version is missing"
+            exit 1
+          fi
+          publish=false
+          if [[ "${EVENT_NAME}" != "pull_request" && "${GIT_REF}" == "refs/heads/main" ]]; then
+            publish=true
+          fi
+          {
+            echo "version=${version}"
+            echo "architectures=${archs}"
+            # GHCR image names must be lowercase; the owner may not be.
+            echo "registry_prefix=ghcr.io/${OWNER,,}"
+            echo "publish=${publish}"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=${version} archs=${archs} publish=${publish}"
+
+      - name: Prepare build matrix
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@2026.09.0
+        with:
+          architectures: ${{ steps.info.outputs.architectures }}
+          image-name: ${{ env.IMAGE_NAME }}
+          registry-prefix: ${{ steps.info.outputs.registry_prefix }}
+
+  build:
+    name: Build ${{ matrix.arch }} image
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        uses: home-assistant/builder/actions/build-image@2026.09.0
+        with:
+          arch: ${{ matrix.arch }}
+          context: ./${{ env.APP_DIR }}
+          image: ${{ matrix.image }}
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          labels: |
+            io.hass.type=app
+            io.hass.name=Send to X3
+          version: ${{ needs.prepare.outputs.version }}
+          push: ${{ needs.prepare.outputs.publish }}
+          load: ${{ needs.prepare.outputs.publish == 'true' && 'false' || 'true' }}
+          cosign: ${{ needs.prepare.outputs.publish }}
+          skip-existing: ${{ needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.version || '' }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke test the image
+        if: needs.prepare.outputs.publish != 'true'
+        env:
+          IMAGE: ${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Every runtime requirement (send_to_x3/requirements.txt) is imported here;
+          # tests/test_packaging.py keeps the list in sync.
+          docker run --rm "${IMAGE}" python3 -c \
+            "import sendtox3, trafilatura, lxml, aiohttp, pypdfium2, segno, jinja2, httpx, charset_normalizer; print('imports ok')"
+          docker run --rm "${IMAGE}" sh -c 'tesseract --version && tesseract --list-langs | grep -qx eng'
+          docker image inspect "${IMAGE}" --format '{{ index .Config.Labels "io.hass.type" }}' | grep -qx app
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      packages: write
+    steps:
+      - name: Publish multi-arch manifest
+        uses: home-assistant/builder/actions/publish-multi-arch-manifest@2026.09.0
+        with:
+          architectures: ${{ needs.prepare.outputs.architectures }}
+          image-name: ${{ env.IMAGE_NAME }}
+          image-tags: |
+            ${{ needs.prepare.outputs.version }}
+            latest
+          registry-prefix: ${{ needs.prepare.outputs.registry_prefix }}
+          skip-existing: ${{ needs.prepare.outputs.version }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}

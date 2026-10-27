@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Send to X3{% endblock %} · Send to X3</title>
+<link rel="stylesheet" href="{{ base }}/admin/static/admin.css?v={{ version }}">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="{{ base }}/admin">Send to X3</a>
+  {% if csrf %}
+  <nav>
+    <a href="{{ base }}/admin">Queue</a>
+    <a href="{{ base }}/admin/setup">Setup</a>
+    {% if not via_ingress %}
+    <form class="inline" method="post" action="{{ base }}/admin/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="link">Sign out</button>
+    </form>
+    {% endif %}
+  </nav>
+  {% endif %}
+</header>
+<main>
+{% if flash %}<div class="flash {{ flash_kind }}" role="status">{{ flash }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+<footer>Send to X3 {{ version }}</footer>
+<script src="{{ base }}/admin/static/admin.js?v={{ version }}"></script>
+</body>
+</html>

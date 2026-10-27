@@ -1,0 +1,124 @@
+# Home Assistant app ("add-on") configuration for Send to X3.
+# Reference: https://contributors.home-assistant.io/apps/reference/configuration/
+#
+# `options` and `schema` mirror sendtox3/config.py (Options) field for field, except
+# `port` (the container port: ingress, the watchdog and the published host port are
+# fixed at 8765, so it is only settable with SENDTOX3_PORT outside Home Assistant);
+# tests/test_packaging.py enforces it. Add an option there first, then here, then
+# in translations/en.yaml and DOCS.md.
+name: "Send to X3"
+version: "0.1.0"
+slug: send_to_x3
+description: "Share web pages, notes, emails and PDFs to an Xteink X3 e-reader as clean, image-free text"
+arch:
+  - aarch64
+  - amd64
+
+# Prebuilt images (published by .github/workflows/build.yml). Leave this commented
+# out to build the image on your Home Assistant host. When you publish your own
+# images, replace REPLACE_OWNER with your lowercase GitHub user or organisation,
+# make the GHCR package public, and uncomment the line.
+# image: "ghcr.io/REPLACE_OWNER/send-to-x3"
+
+# The HA base image runs s6-overlay as PID 1, so Docker must not add its own init.
+init: false
+startup: application
+boot: auto
+
+# One aiohttp server on 8765 serves everything. Requests from the Supervisor
+# (172.30.32.2) are the ingress admin UI; everything else is the token-protected
+# LAN API, OPDS feed and device endpoints the X3 and the share shortcuts use.
+# The X3 cannot use ingress (it needs a Home Assistant login session), so the
+# port is also published on the host.
+ingress: true
+ingress_port: 8765
+ingress_stream: true
+panel_icon: mdi:book-arrow-right
+panel_title: "Send to X3"
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: "Share API, OPDS feed and X3 device endpoints (LAN, plain HTTP)"
+watchdog: "http://[HOST]:[PORT:8765]/healthz"
+
+# homeassistant_api: subscribe to mobile_app.share events (Companion app share
+# sheet) over ws://supervisor/core/websocket.
+# hassio_api (role "default"): read /network/info to find the host's LAN address
+# for the URLs written into the X3 plugin. /addons/self/info needs no role.
+homeassistant_api: true
+hassio_api: true
+hassio_role: default
+
+# Temporary files (uploads, PDF conversion) stay in RAM instead of the SD card.
+tmpfs: true
+
+# Cold backup: the Supervisor stops the app while it copies /data and starts it
+# again afterwards. The SQLite database runs in WAL mode, so a hot copy could pair a
+# sendtox3.db and sendtox3.db-wal from different moments (and rows with item files
+# from another moment). A pre-backup command cannot make that safe: it runs in a
+# separate process and the app keeps writing while the files are copied. The stop
+# is short; mail waits on the IMAP server and the X3 tries again at its next delivery.
+backup: cold
+backup_exclude:
+  - "*.tmp"
+  - "*.part"
+  - "*.db-shm"
+
+options:
+  log_level: info
+  server_host: ""
+  ingest_token: ""
+  device_token: ""
+  admin_token: ""
+  imap_enabled: false
+  imap_host: imap.gmail.com
+  imap_port: 993
+  imap_user: ""
+  imap_password: ""
+  imap_folder: INBOX
+  imap_processed_folder: ""
+  imap_plus_tag: ""
+  allowed_senders: []
+  require_dmarc: true
+  ha_share_enabled: true
+  device_host: ""
+  push_poll_seconds: 20
+  push_folder: /Inbox
+  auto_delivery: true
+  delivery_format: epub
+  inbox_folder: /Inbox
+  retention_days: 30
+  pdf_enabled: true
+  pdf_ocr: false
+  fetch_timeout_seconds: 20
+  allow_private_urls: false
+
+schema:
+  log_level: list(debug|info|warning|error)
+  server_host: str?
+  ingest_token: password?
+  device_token: password?
+  admin_token: password?
+  imap_enabled: bool
+  imap_host: str
+  imap_port: port
+  imap_user: str?
+  imap_password: password?
+  imap_folder: str
+  imap_processed_folder: str?
+  imap_plus_tag: str?
+  allowed_senders:
+    - str?
+  require_dmarc: bool
+  ha_share_enabled: bool
+  device_host: str?
+  push_poll_seconds: int(5,3600)
+  push_folder: str
+  auto_delivery: bool
+  delivery_format: list(epub|txt)
+  inbox_folder: str
+  retention_days: int(1,3650)
+  pdf_enabled: bool
+  pdf_ocr: bool
+  fetch_timeout_seconds: int(5,120)
+  allow_private_urls: bool

@@ -1,0 +1,47 @@
+PDF test fixtures: sources and licences
+=======================================
+
+These files are used only by the PDF extraction tests (tests/test_pdf*.py). The
+Python generator pdfgen.py in this folder builds the synthetic test PDFs at test
+time; it is part of this project.
+
+acl_bert_2col.pdf
+    Jacob Devlin, Ming-Wei Chang, Kenton Lee, Kristina Toutanova. "BERT: Pre-training
+    of Deep Bidirectional Transformers for Language Understanding". Proceedings of
+    NAACL-HLT 2019, pages 4171-4186. Association for Computational Linguistics.
+    https://aclanthology.org/N19-1423/  (PDF: https://aclanthology.org/N19-1423.pdf)
+    Copyright 2019 Association for Computational Linguistics. Licensed under the
+    Creative Commons Attribution 4.0 International License (CC BY 4.0),
+    https://creativecommons.org/licenses/by/4.0/ . Unmodified.
+
+scotus_601us1r05.pdf
+    Supreme Court of the United States, McElrath v. Georgia, 601 U. S. 87 (2024),
+    preliminary print. https://www.supremecourt.gov/opinions/23pdf/601us1r05_1qm2.pdf
+    Work of the United States Government (17 U.S.C. 105); not subject to copyright in
+    the United States. Unmodified.
+
+mmwr_7301a1.pdf
+    Centers for Disease Control and Prevention, "Topical Antifungal Prescribing for
+    Medicare Part D Beneficiaries - United States, 2021", MMWR 2024;73(1):1-5.
+    https://www.cdc.gov/mmwr/volumes/73/wr/pdfs/mm7301a1-H.pdf
+    Work of the United States Government. CDC states that all material in the MMWR
+    Series is in the public domain and may be used and reprinted without permission;
+    citation as to source is appreciated. Unmodified.
+
+crs_if13335_2col.pdf
+    Congressional Research Service, Alexandra Hegji and Darryl E. Getter, "Student
+    Loans: Late Payment Trends, Servicing Practices, and Credit Reporting Issues",
+    In Focus IF13335, October 23, 2026. Retrieved from
+    https://www.everycrsreport.com/files/2026-10-23_IF13335_852e7f6a9a7f1f35242c2e31f50dbe45c8b74dd2.pdf
+    Work of the United States Government, not subject to copyright in the United
+    States. MODIFIED: all raster images (the CRS banner and a chart credited to the
+    Federal Reserve Bank of New York, i.e. possible third-party material) were removed
+    from the file; the text and vector graphics are unchanged.
+
+archive_scan_page.pdf
+    One page of David Hastings Moore, "An escape that did not set me free: a
+    by-product of Morgan's raid" (1915), digitized by the Internet Archive,
+    https://archive.org/details/escapethatdidnot00moor . Published 1915, public domain
+    in the United States; the Library of Congress lists no known restrictions.
+    MODIFIED: a single page re-rendered at 200 dpi as an image without a text layer
+    (to test scan detection and OCR).

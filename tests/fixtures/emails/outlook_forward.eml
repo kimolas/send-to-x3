@@ -1,0 +1,53 @@
+Received: from EXAMPLE01.prod.outlook.com (2603:10b6::1) by mx.example.org; Thu, 22 Oct 2026 14:05:00 +0000
+Authentication-Results: spf=pass (sender IP is 192.0.2.44) smtp.mailfrom=example.org; dkim=pass (signature was verified) header.d=example.org;dmarc=pass action=none header.from=example.org;compauth=pass reason=100
+MIME-Version: 1.0
+Date: Thu, 22 Oct 2026 10:05:00 -0400
+From: Qiong Example <qiong@example.org>
+To: "x3 reader" <x3reader+k7q2@gmail.com>
+Subject: FW: Plan for the reading group
+Message-ID: <PH0PR00MB0005@PH0PR00MB0005.namprd00.prod.outlook.com>
+Content-Type: multipart/alternative; boundary="_000_PH0PR00MB0005_"
+
+--_000_PH0PR00MB0005_
+Content-Type: text/plain; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+FYI
+
+________________________________
+From: Carol Planner <carol@example.com>
+Sent: Thursday, October 22, 2026 10:00 AM
+To: Qiong Example <qiong@example.org>
+Subject: Plan for the reading group
+
+Hello all,
+
+The plan for next week =97 we meet at the caf=E9 at 10. Bring the essay you=
+ liked most this month and one question about it.
+
+Thanks,
+Carol
+
+Get Outlook for iOS<https://aka.ms/o0ukef>
+
+--_000_PH0PR00MB0005_
+Content-Type: text/html; charset="Windows-1252"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=
+=3DWindows-1252"><style type=3D"text/css" style=3D"display:none;"> P {margi=
+n-top:0;margin-bottom:0;} </style></head><body dir=3D"ltr"><div class=3D"el=
+ementToProof" style=3D"font-family: Aptos, Calibri, Helvetica, sans-serif; =
+font-size: 12pt;">FYI</div><div id=3D"appendonsend"></div><hr style=3D"disp=
+lay:inline-block;width:98%" tabindex=3D"-1"><div id=3D"divRplyFwdMsg" dir=
+=3D"ltr"><font face=3D"Calibri, sans-serif" style=3D"font-size:11pt" color=
+=3D"#000000"><b>From:</b> Carol Planner &lt;carol@example.com&gt;<br><b>Sen=
+t:</b> Thursday, October 22, 2026 10:00 AM<br><b>To:</b> Qiong Example &lt;=
+qiong@example.org&gt;<br><b>Subject:</b> Plan for the reading group</font><=
+div>&nbsp;</div></div><div dir=3D"ltr"><p>Hello all,</p><p>The plan for nex=
+t week =97 we meet at the caf=E9 at 10. Bring the essay you liked most this=
+ month and one question about it.</p><p>Thanks,<br>Carol</p><div id=3D"ms-o=
+utlook-mobile-signature">Get <a href=3D"https://aka.ms/o0ukef">Outlook for =
+iOS</a></div></div></body></html>
+
+--_000_PH0PR00MB0005_--

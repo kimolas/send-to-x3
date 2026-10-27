@@ -1,0 +1,31 @@
+Delivered-To: x3reader+k7q2@gmail.com
+Received: by 2002:a05:6000:1:b0:1 with SMTP id x; Sun, 25 Oct 2026 06:00:01 -0700 (PDT)
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@example.org header.s=s2026 header.b=AbCdEf12;
+       spf=pass (google.com: domain of qiong@example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=qiong@example.org;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 09:00:00 -0400
+From: Qiong Example <qiong@example.org>
+To: x3reader+k7q2@gmail.com
+Subject: Fwd: Minutes
+Message-ID: <tb-0019@example.org>
+Content-Type: text/plain; charset=UTF-8; format=flowed
+Content-Transfer-Encoding: 8bit
+User-Agent: Mozilla Thunderbird
+
+
+
+
+-------- Forwarded Message --------
+Subject: 	Minutes
+Date: 	Wed, 21 Oct 2026 18:00:00 +0200
+From: 	Erin Clerk <erin@example.com>
+To: 	reading-group@example.com
+
+
+
+Minutes of the reading group, 21 October. We discussed the essay on 
+libraries and agreed to read the long walk piece next.
+
+Action: everyone brings one question.
