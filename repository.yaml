@@ -4,6 +4,5 @@
 # never add files named config.yaml, config.yml or config.json anywhere else in
 # this repository (tests/test_packaging.py checks this).
 name: "Send to X3"
-# Set these when you publish the repository:
-# url: "https://github.com/REPLACE_OWNER/send-to-x3"
-# maintainer: "Your Name <you@example.com>"
+url: "https://github.com/kimolas/send-to-x3"
+maintainer: "kimolas"

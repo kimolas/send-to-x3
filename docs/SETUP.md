@@ -143,7 +143,8 @@ have separate data and tokens.
 
 - **Option A, local app:** you copy the `send_to_x3` folder onto the Pi. Works today.
 - **Option B, app repository:** you paste the project's GitHub address into Home
-  Assistant. Only once the repository has been published.
+  Assistant (`https://github.com/kimolas/send-to-x3`). Home Assistant then offers
+  updates like for any other app.
 
 ### Option A: install as a local app
 
@@ -218,13 +219,11 @@ If **Send to X3** does not appear: open **Settings > System > Logs**, choose
 offers **Update**; otherwise use **Rebuild** on the app page. Your items, options and
 tokens are kept.
 
-### Option B: install from the app repository (once published)
-
-Use this only after the project's repository has been published on GitHub.
+### Option B: install from the app repository
 
 1. Open **Settings > Apps > Install app**, then the menu at the top right, then
    **Repositories**.
-2. Paste the repository address (for example `https://github.com/<owner>/send-to-x3`)
+2. Paste the repository address `https://github.com/kimolas/send-to-x3`
    and select **Add**, then close the dialog.
 3. The app store shows a section named **Send to X3**. Select the app, then
    **Install**.

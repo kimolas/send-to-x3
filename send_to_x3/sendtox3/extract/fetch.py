@@ -54,7 +54,7 @@ __all__ = [
 ]
 
 _MAJOR_MINOR = ".".join(__version__.split(".")[:2])
-USER_AGENT = f"Mozilla/5.0 (compatible; SendToX3/{_MAJOR_MINOR}; +https://github.com/)"
+USER_AGENT = f"Mozilla/5.0 (compatible; SendToX3/{_MAJOR_MINOR}; +https://github.com/kimolas/send-to-x3)"
 MAX_REDIRECTS = 5
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 _DEFAULT_HEADERS = {
