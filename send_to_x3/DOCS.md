@@ -2,7 +2,10 @@
 
 Send to X3 turns web pages, pasted text, emails and PDFs into clean, image-free
 reading files and gets them onto an Xteink X3 running stock CrossPoint firmware.
-Nothing on the X3 is modified, and nothing needs to be reachable from the internet.
+Nothing on the X3 needs to be modified, and nothing needs to be reachable from the
+internet. The optional Send to X3 firmware (CrossPoint plus one change) also opens
+the book you pick in Home > Plugins > Send to X3 in the reader right away (books
+delivered at sleep or by LAN push wait in the Library as usual).
 
 This page is the configuration reference. Step-by-step guides (iPhone Shortcut,
 Android, Gmail filter, X3 setup) are in the `docs/` folder of the app repository.
@@ -43,6 +46,16 @@ confirmed yet** and the first row reads **Nothing new right now**, so a habitual
 Confirm never replaces the book you are reading. A cancelled or failed download is
 offered again; a fetch that is never reported comes back after two hours under a new
 name. Two fetches never get the same file name (a repeat ends in ` (2)`).
+
+On the **Send to X3 firmware** (CrossPoint develop plus one change, installed from the
+SD card; see `docs/FIRMWARE.md` in the app repository) the button on these rows reads
+**Open**: the book downloads, the X3 reports it to the app at once, and the book opens
+in the reader. **Open** again on a single item's row opens the copy that row saved
+(the same file in `/Inbox`) where you left off, without downloading it again; a **Get
+N new** book is reopened from the X3's Home or Library instead. The plugin installed
+by this version enables that; other CrossPoint builds ignore it and download as
+described above. The Wi-Fi install on the Setup page says which of the two your X3
+does. This firmware was not yet tried on a real X3, only in the simulator.
 
 `auto_delivery` (off by default) also delivers new items with no taps when the X3
 goes to sleep on your home Wi-Fi. It joins Wi-Fi at every sleep, and needs a

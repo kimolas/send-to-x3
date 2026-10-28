@@ -37,11 +37,12 @@ import shutil
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Optional, Union
+from typing import Any, Callable, Iterable, Mapping, Optional, Union
 
 from .firmware import SIM_SSID, Firmware
 
 PLUGIN_NAME = "sendtox3"
+PAGE_SIZE = 8  # browse.page_size (the app's delivery.PAGE_SIZE)
 PLUGIN_DIR = f"/.crosspoint/plugins/{PLUGIN_NAME}"
 INBOX = "/Inbox"
 
@@ -113,7 +114,10 @@ def spec_device_json(base_url: str, device_token: str, *, delivery_format: str =
     """``device.json`` exactly as docs/ARCHITECTURE.md §10 specifies it.
 
     Used when the app's own ``sendtox3.plugin_bundle`` is not importable, so the
-    harness can run against any backend that implements the device API.
+    harness can run against any backend that implements the device API. ``{offset}``
+    makes develop (c3b16da and later) page by offset with a lookahead row; older
+    firmware sends it as the literal text. ``download.open`` is read only by the Send
+    to X3 firmware (Confirm opens the book); stock firmware ignores it.
     """
     base = base_url.rstrip("/")
     auth = {"Authorization": f"Bearer {device_token}"}
@@ -122,17 +126,18 @@ def spec_device_json(base_url: str, device_token: str, *, delivery_format: str =
         "description": "Articles and notes you shared",
         "browse": {
             "format": "json",
-            "url": f"{base}/device/v1/catalog?page={{page}}&limit={{limit}}",
+            "url": f"{base}/device/v1/catalog?page={{page}}&limit={{limit}}&offset={{offset}}",
             "headers": dict(auth),
             "items": "items",
             "fields": {"title": "title", "author": "subtitle", "id": "id"},
-            "page_size": 8,
+            "page_size": PAGE_SIZE,
         },
         "download": {
             "url": f"{base}/device/v1/items/{{id}}.{delivery_format}" + ("" if auto_delivery else "?confirm=1"),
             "headers": dict(auth),
             "dest_dir": inbox,
             "filename": f"{{title}}.{delivery_format}",
+            "open": True,
         },
     }
     if auto_delivery:
@@ -158,6 +163,12 @@ def spec_device_json(base_url: str, device_token: str, *, delivery_format: str =
             }
         }
     return doc
+
+
+def drop_download_open(doc: dict) -> None:
+    """A ``build_sd(device_json=...)`` edit: no ``download.open``, as a 0.2.0 bundle or
+    any other catalog has, so the Send to X3 firmware takes its stock download path."""
+    (doc.get("download") or {}).pop("open", None)
 
 
 def spec_bundle_zip(base_url: str, device_token: str, **kwargs: Any) -> bytes:
@@ -265,6 +276,7 @@ def build_sd(
     wifi_password: str = "",
     bundle: Union[BytesLike, Path, str, None] = None,
     plugin_files: Optional[Mapping[str, Union[BytesLike, str]]] = None,
+    device_json: Optional[Callable[[dict], None]] = None,
     opds_servers: Iterable[OpdsServer] = (),
     opds_download_folder: str = INBOX,
     opds_filename_format: Optional[int] = None,
@@ -276,7 +288,9 @@ def build_sd(
     """Create a fresh simulated card at ``root``.
 
     ``bundle`` is a plugin bundle zip (bytes or path) extracted at the root;
-    ``plugin_files`` maps absolute SD paths to content as an alternative. ``files``
+    ``plugin_files`` maps absolute SD paths to content as an alternative;
+    ``device_json`` edits the installed plugin's ``device.json`` in place (e.g.
+    :func:`drop_download_open`). ``files``
     pre-places books or other content. ``settings`` adds or overrides settings keys.
     ``inbox`` (default ``/Inbox``) is created empty unless None: sleep-time event
     downloads never create folders (2.0.0rc ``PluginEvents.cpp:336-366``).
@@ -323,6 +337,13 @@ def build_sd(
         if path.endswith("/device.json"):
             plugin_dir = path.rsplit("/", 1)[0]
             break
+    if device_json is not None:
+        if plugin_dir is None:
+            raise ValueError("device_json needs a plugin (bundle or plugin_files with a device.json)")
+        host = sd_path(root, plugin_dir + "/device.json")
+        doc = json.loads(host.read_text(encoding="utf-8"))
+        device_json(doc)
+        host.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
     if inbox:
         sd_path(root, inbox).mkdir(parents=True, exist_ok=True)

@@ -64,8 +64,13 @@
      the last fetch is saved as one book in <code>{{ opts.inbox_folder }}</code>. The rows below list everything you
      shared, to download one at a time.{% if opts.auto_delivery %} New reading is also delivered automatically when
      the X3 goes to sleep on your home Wi-Fi (option <code>auto_delivery</code>; the X3 then joins Wi-Fi at every
-     sleep).{% else %} The X3 confirms each saved download the next time it joins Wi-Fi (go back to Home, then open
-     Send to X3 again); until then the queue shows "sent, not confirmed yet".{% endif %}</p>
+     sleep).{% else %} The X3 reports each saved download to the app: the Send to X3 firmware right before the book
+     opens, other builds the next time it joins Wi-Fi (go back to Home, then open Send to X3 again); until then the
+     queue shows "sent, not confirmed yet".{% endif %}</p>
+  <p class="muted">On the Send to X3 firmware (CrossPoint plus one change, see <code>docs/FIRMWARE.md</code> in the
+     app's repository) Confirm reads <strong>Open</strong> and opens the book right away. On other CrossPoint builds it
+     saves the book and shows "Download complete". Installing over Wi-Fi below shows which one this X3 has. A plugin
+     installed by an earlier version of this app never reads <strong>Open</strong>: install it again (below).</p>
   {% if opts.auto_delivery %}
   <p class="muted">Delivery at sleep needs a CrossPoint build newer than 2.0.0rc (with the fix "Load WiFi settings from
      file before sleep mode", develop commit facaa87). On 2.0.0rc new items arrive the next time the X3 joins Wi-Fi

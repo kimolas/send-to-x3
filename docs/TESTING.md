@@ -15,28 +15,30 @@ into Terminal as it is; replace anything in `<angle brackets>` with your own val
 | 1. Unit and integration tests | Every module on its own, and whole flows through the real app with fake web sites, fake mail servers, a fake Home Assistant and a fake X3 | Python 3.14 | about 1 min | `scripts/check_all.sh` |
 | 2. Docker tests | The app image builds and starts the way Home Assistant runs it; every generated EPUB passes W3C epubcheck; email works against a real IMAP server; the Android import file loads in HTTP Shortcuts' own code | Docker Desktop | about 1.5 min once images are cached | `scripts/check_all.sh --docker` |
 | 3. Firmware host harnesses | CrossPoint's own EPUB, TXT, OPDS and file-name code, compiled on the Mac, accepts what the app produces (1.6.5, 2.0.0rc and develop `3f387a9`) | Xcode Command Line Tools, SDL2 (the build step is shared with level 4) | about 1.5 min plus the first build | `scripts/check_all.sh --firmware` |
+| 3b. The Send to X3 firmware | CrossPoint's own host tests for the plugin catalog code the Send to X3 patch touches (opening books, paging, manifests), then the X3 firmware build itself | Docker Desktop | a few minutes; 20 to 40 min for the first build | `firmware/build.sh --tests-only`, `firmware/build.sh` |
 | 4. Simulator end-to-end | The whole CrossPoint firmware, running in a simulator, talks to the real app: plugin catalog, sleep delivery, LAN push, OPDS, opening the files | SDL2, Docker Desktop | about 4 min per backend plus the first build | `scripts/check_all.sh --e2e` |
 | 5. Home Assistant | Home Assistant's Supervisor accepts the app's configuration; a real Supervisor builds, installs and starts it | Network; Docker Desktop for the install test | about 1 min (a few minutes the first time); 5 to 15 min for the install test | `scripts/check_all.sh --supervisor`, `e2e/ha/devcontainer_install.sh` |
 | 6. Manual acceptance | Your real Pi, X3, iPhone, Android phone and Gmail | The devices | about 2 hours | [checklist below](#manual-acceptance-checklist-on-your-real-devices) |
 
-`scripts/check_all.sh --all` runs levels 1 to 5 except the Home Assistant install
-test, which is started on its own.
+`scripts/check_all.sh --all` runs levels 1 to 5 except level 3b and the Home Assistant
+install test, which are started on their own.
 
 ## Latest measured results
 
-These are the most recent runs on the development Mac (Apple Silicon, 2026-10-27),
-all on version 0.2.0 (after its five review rounds), with
+These are the most recent runs on the development Mac (Apple Silicon, 2026-10-28),
+all on version 0.3.0 and the Send to X3 firmware patch (after one review round), with
 `scripts/check_all.sh --all` plus `e2e/ha/devcontainer_install.sh`.
 
 | Level | Result |
 |---|---|
-| 1. Unit and integration tests | 2401 passed, 35 skipped (about 75 s) |
+| 1. Unit and integration tests | 2480 passed, 36 skipped (about 77 s) |
 | 2. Docker tests (image build and smoke, epubcheck, GreenMail IMAP, Android import) | 13 passed, 3 skipped (OCR tests that need tesseract on the host; OCR runs in the image) |
 | 3. Firmware host harnesses | 46 passed, against CrossPoint 1.6.5, 2.0.0rc and develop `3f387a9` |
-| 4. Simulator end-to-end, real app (`python -m sendtox3`) | 12 of 12 scenario runs passed, 258 of 258 checks |
-| 4. Simulator end-to-end, real app image (docker) | 9 of 9 scenario runs passed, 176 of 176 checks |
+| 4. Simulator end-to-end, real app (`python -m sendtox3`) | 25 of 25 scenario runs passed, 563 of 563 checks (2.0.0rc, 1.6.5, `3f387a9`, develop `8f4d035` and the fork) |
+| 4. Simulator end-to-end, real app image (docker) | 16 of 16 scenario runs passed, 353 of 353 checks (2.0.0rc, 1.6.5 and the fork) |
 | 5. Supervisor validation | 58 of 58 checks passed, 27 form fields |
 | 5. Install in a real Supervisor | Passed (devcontainer `5-apps`, stable channel): build, install, start, `/healthz`, 401 without a token, paste form and 20 MB upload through ingress, Companion app share |
+| Send to X3 firmware (`firmware/build.sh`) | Built `2.0.0-sx3+142f6b6` (5,497,008 bytes, 83.7% of the app slot); 25 of 25 plugin host tests passed; `esptool image_info`: ESP32-C3, checksum and SHA-256 valid |
 
 Re-run levels 2 to 5 with `scripts/check_all.sh --all` and
 `e2e/ha/devcontainer_install.sh` before a release.
@@ -154,8 +156,9 @@ What is covered, by area:
 | EPUB and TXT output, firmware-safe titles, uploaded EPUBs (size and time limits) | `test_render_epub.py`, `test_render_txt.py`, `test_names.py`, `test_render_validation.py` (corpus part), `test_fix_D_epub_urls.py`, `test_fix2_D_epub.py` |
 | Email: parsing, the acceptance filter (plus-tag, allowed senders, DMARC/DKIM), refusing all mail when neither `allowed_senders` nor `imap_plus_tag` is set or when `'*'` is used in a plain INBOX, the IMAP worker against a fake server (refused mail left unread, the first check of an untagged INBOX, the attempt counter) | `test_email.py`, `test_email_accept.py`, `test_imap_worker.py`, `test_fix_C_*.py`, `test_fix2_C_email.py`, `test_fix2_C_wildcard.py`, `test_fix2_C_imap.py` |
 | Home Assistant Companion app shares (`mobile_app.share`) against a fake Home Assistant | `test_ha_share.py`, `test_fix_G_ha_share.py` |
+| Plugin catalog paging as each firmware does it: 2.0.0rc and develop `3f387a9` (`limit=9` and the literal text `{offset}`), develop `8f4d035` and the Send to X3 firmware (`limit=9` and a numeric `offset`), and the same with a plugin installed by 0.2.0 (`limit=8`, no `offset`), for 0, 7, 8, 9, 15 and 20 items: every row exactly once, the first row on page 1 only | `test_web_device.py`, `test_delivery.py` |
 | X3 delivery: the "Get N new" row (bundle contents, stable ids and bytes, file names that never repeat, replaced bundles, "Nothing new right now", TXT bundles, a download in the other format, a failing build that still lists the items, the X3's confirmation of saved files, a dropped download marking nothing, a read-all-then-close counting, the TCP-acknowledgement decision, items awaiting the report kept out of new bundles and sleep delivery and re-offered after the grace period under a new name, other plugins' reports ignored, the queue's "not confirmed yet"), plugin catalog paging with that row, downloads, sleep delivery (repeat requests get the same file, digests, size caps, and "nothing new" when `auto_delivery` is off, the default), OPDS feed with its first entry | `test_fetch_bundle.py`, `test_delivery.py`, `test_web_device.py`, `test_opds.py`, `test_fix_A_delivery.py` |
-| LAN push and plugin install against a fake CrossPoint File Transfer server (1.6.5 and 2.0) | `test_lan_push.py`, `test_device_client.py`, `test_plugin_bundle.py`, `test_fix_E_plugin_bundle.py`, `test_fix2_E_plugin_bundle.py` |
+| LAN push and plugin install against a fake CrossPoint File Transfer server (1.6.5 and 2.0), including the install log line that says whether **Confirm** opens the book (`catalog.open_after_download` in `/api/status`) and `download.open` in every plugin | `test_lan_push.py`, `test_device_client.py`, `test_plugin_bundle.py`, `test_fix_E_plugin_bundle.py`, `test_fix2_E_plugin_bundle.py` |
 | The admin web UI: Home Assistant ingress, token sign-in, CSRF protection, forms, the Setup page (the Android HTTP Shortcuts file filled in with the server address and token, **New device token**, address warnings), plugin bundle download and install, warnings | `test_web_admin.py`, `test_fix_E_web.py`, `test_fix2_E_web.py` |
 | Start-up, worker restarts, daily clean-up, `--show-tokens`, retrying the server address detection | `test_web_main.py`, `test_fix_E_main.py` |
 | Database and files (owner-only permissions, no clash between identical uploads) | `test_store.py`, `test_fix_A_store.py`, `test_fix2_A_store.py` |
@@ -264,6 +267,33 @@ SENDTOX3_FIRMWARE_TESTS=1 CP_REPO="$W/fw/1.6.5:$W/fw/2.0.0rc:$W/fw/3f387a9" SEND
 
 ---
 
+## Level 3b: the Send to X3 firmware
+
+The optional [Send to X3 firmware](FIRMWARE.md) is upstream CrossPoint at a pinned
+commit plus one patch (`firmware/`; developer notes in
+[`firmware/README.md`](../firmware/README.md)). Its checks run in Docker:
+
+```sh
+firmware/build.sh --tests-only     # the host tests only
+firmware/build.sh                  # the host tests, then the firmware build
+```
+
+| Check | What it proves |
+|---|---|
+| The patch applies | `firmware/patches/` applies with `git am` on the commit in `firmware/UPSTREAM` |
+| `PluginCatalogOpenTest` | Without `download.open` every row downloads; bundle rows and files the reader does not open keep the download screen; a book on the card opens without a download; a new book downloads, then opens; `catalog.open_after_download` is advertised |
+| `PluginCatalogPagingTest`, `PluginManifestClassificationTest`, `PluginPickerLayoutTest` | Upstream's tests for the catalog code around the patch still pass |
+| The build | `pio run -e sendtox3` builds `firmware/dist/crosspoint-2.0.0-sx3+<hash>-x3-x4.bin` and a `.size.txt` with the RAM and flash use |
+
+**What you should see:** ctest's `100% tests passed`, and after a build the last lines
+name the files in `firmware/dist/`. The first build downloads the toolchain into
+Docker volumes (about 5 GB) and takes 20 to 40 minutes.
+
+Not covered here: the firmware on a real X3 (see the checklist,
+[section M](#m-the-send-to-x3-firmware-optional)).
+
+---
+
 ## Level 4: the X3 simulator, end to end
 
 This runs the **whole CrossPoint firmware** for the X3, compiled with
@@ -276,14 +306,18 @@ Details: [`e2e/README.md`](../e2e/README.md).
 scripts/check_all.sh --e2e
 ```
 
-This builds three simulators the first time (about 1.5 minutes each) and the wire
-harness, then runs:
+This builds five simulators the first time (1.6.5, 2.0.0rc, develop `3f387a9`, develop
+and the Send to X3 firmware; about 1.5 minutes each) and the wire harness for the four
+2.x builds, then runs:
 
-1. every scenario on every firmware against the app started as `python -m sendtox3`
-   (12 runs: `e2e/run_e2e.py -f all -b local`);
-2. every scenario on the two releases (2.0.0rc and 1.6.5) against the app's Docker
-   image (9 runs: `e2e/run_e2e.py -f releases -b docker`). Docker Desktop must be
-   running.
+1. every scenario on every firmware it supports against the app started as
+   `python -m sendtox3` (`e2e/run_e2e.py -f all -b local`);
+2. every scenario on the two releases (2.0.0rc and 1.6.5) and the Send to X3 firmware
+   against the app's Docker image (`e2e/run_e2e.py -f releases,fork -b docker`).
+   Docker Desktop must be running.
+
+The number of runs and checks for each is in
+[Latest measured results](#latest-measured-results).
 
 **What you should see** for each backend is a table like:
 
@@ -298,12 +332,18 @@ report: /Users/<you>/.cache/sendtox3-e2e/runs/<date-time>/report.json
 
 | Id | Firmware | What it proves |
 |---|---|---|
-| **S1** catalog | 2.0.0rc, `3f387a9` | The installed plugin has no sleep delivery (the default), only the download report. On the X3, Home > Plugins > Send to X3 starts with **Get 2 new** (the request carries the device token); Confirm on it saves `/Inbox/Get 2 new · <date time>.epub`, one EPUB with both items, and queues `book.downloaded`. Until the report the first row reads **Nothing new right now** (awaiting the report, not offered again); after the restart, opening the plugin again POSTs the saved path before the list loads, which then counts the items. Selecting the entries below saves `/Inbox/<title>.epub`, byte for byte what the app served. A title full of characters the firmware refuses (`Wait... what? A/B: …`) is made safe by the app and still downloads |
-| **S2** sleep delivery | 2.0.0rc, `3f387a9` | With the optional `auto_delivery` on, going to sleep fetches everything new as one EPUB, `/Inbox/<time>-<event>.epub` (a two-chapter digest for two items). With nothing new the app answers "nothing" (404), the X3 writes no file and keeps the request queued; the next attempt repeats the same request and receives the next new item. On 2.0.0rc it also proves that a sleep right after waking sends nothing (see the finding below); on `3f387a9` the plain wake, sleep cycle delivers with no taps |
-| **S3** LAN push | 2.0.0rc, 1.6.5 | With the X3 on Home > File Transfer > Join a Network, the app finds the X3's own web server, creates `/Inbox` if needed and uploads one file per item. When a different file with the same name is already on the card, it saves `<title> (2).<ext>` and leaves the old file alone. Run with EPUB (the default) and with TXT |
-| **S4** OPDS | 2.0.0rc, 1.6.5 | The X3's OPDS browser signs in with user `x3` and the device token, reads the feed and saves its first entry, **Get 2 new** (no author), as `/Inbox/Get 2 new · <date time>.epub`: one EPUB with both items, and no single entry downloaded |
-| **S5** reading | 2.0.0rc, 1.6.5 | The EPUB and TXT the app serves open in the real reader; pages 1 and 2 have text on them, page 2 differs from page 1, and the firmware logs no errors. Screenshots are saved for a human to look at |
-| **W1** wire | 2.0.0rc, `3f387a9` | The X3's own HTTP code (not the simulator's stand-in) against the app: the exact bytes the X3 sends, catalog, download, the **Get 1 new** row (saved as `/Inbox/<row title>.epub`, then **Nothing new right now**), sleep delivery with `auto_delivery` on, a "nothing new" reply that keeps the request queued, and with the default plugin the confirmation (`?confirm=1`, then `POST /device/v1/fetched` with the saved path at the next drain; nothing is counted before it; a sleep wants no Wi-Fi) |
+| **S1** catalog | 2.0.0rc, `3f387a9`, develop, fork (with `download.open` removed, so the fork's stock path is covered) | The browse request is what that build sends (`limit=9`; `offset={offset}` as literal text on 2.0.0rc and `3f387a9`, a number on develop). The installed plugin has no sleep delivery (the default), only the download report. On the X3, Home > Plugins > Send to X3 starts with **Get 2 new** (the request carries the device token); Confirm on it saves `/Inbox/Get 2 new · <date time>.epub`, one EPUB with both items, and queues `book.downloaded`. Until the report the first row reads **Nothing new right now** (awaiting the report, not offered again); after the restart, opening the plugin again POSTs the saved path before the list loads, which then counts the items. Selecting the entries below saves `/Inbox/<title>.epub`, byte for byte what the app served. A title full of characters the firmware refuses (`Wait... what? A/B: …`) is made safe by the app and still downloads |
+| **S2** sleep delivery | 2.0.0rc, `3f387a9`, develop, fork | With the optional `auto_delivery` on, going to sleep fetches everything new as one EPUB, `/Inbox/<time>-<event>.epub` (a two-chapter digest for two items). With nothing new the app answers "nothing" (404), the X3 writes no file and keeps the request queued; the next attempt repeats the same request and receives the next new item. On 2.0.0rc it also proves that a sleep right after waking sends nothing (see the finding below); on `3f387a9` the plain wake, sleep cycle delivers with no taps |
+| **S3** LAN push | 2.0.0rc, 1.6.5, develop, fork | With the X3 on Home > File Transfer > Join a Network, the app finds the X3's own web server, creates `/Inbox` if needed and uploads one file per item. When a different file with the same name is already on the card, it saves `<title> (2).<ext>` and leaves the old file alone. Run with EPUB (the default) and with TXT |
+| **S4** OPDS | 2.0.0rc, 1.6.5, develop, fork | The X3's OPDS browser signs in with user `x3` and the device token, reads the feed and saves its first entry, **Get 2 new** (no author), as `/Inbox/Get 2 new · <date time>.epub`: one EPUB with both items, and no single entry downloaded |
+| **S5** reading | 2.0.0rc, 1.6.5, develop, fork | The EPUB and TXT the app serves open in the real reader; pages 1 and 2 have text on them, page 2 differs from page 1, and the firmware logs no errors. Screenshots are saved for a human to look at |
+| **W1** wire | 2.0.0rc, `3f387a9`, develop, fork | The X3's own HTTP code (not the simulator's stand-in) against the app: the exact bytes the X3 sends, catalog, download, the **Get 1 new** row (saved as `/Inbox/<row title>.epub`, then **Nothing new right now**), sleep delivery with `auto_delivery` on, a "nothing new" reply that keeps the request queued, and with the default plugin the confirmation (`?confirm=1`, then `POST /device/v1/fetched` with the saved path at the next drain; nothing is counted before it; a sleep wants no Wi-Fi) |
+| **S6** open | fork | The Send to X3 firmware's **Open**: on **Get 2 new** the book downloads (`?confirm=1`), the X3 POSTs the saved path to `/device/v1/fetched` before it restarts, and the restart goes straight into the reader with that book (page 1 is the page **Browse Files** shows for it; a page turn works); afterwards the first row reads **Nothing new right now**. A single row downloads, reports and opens the same way (the test turns to page 2); the same row again opens with no request at all, on page 2 (same page image, the reader logs the saved position, `progress.bin` unchanged); **Nothing new right now** shows the error screen, with no restart and no file |
+
+"develop" is CrossPoint develop `8f4d035` (2026-10-28) and "fork" the Send to X3
+firmware built from it (`firmware/UPSTREAM` plus `firmware/patches/`) on a simulator
+patched so that a restart relaunches the program like the X3's reboot; details in
+[`e2e/README.md`](../e2e/README.md).
 
 Checks never read text off the screen. They use the screens the firmware logs, other
 firmware log lines, the files on the simulated SD card, the HTTP traffic recorded
@@ -339,11 +379,14 @@ python e2e/run_e2e.py --list                       # the scenarios and their fir
 python e2e/run_e2e.py -s S2 -f 2.0.0rc -b local    # one scenario, one firmware, the real app
 python e2e/run_e2e.py -f all -b local              # what check_all.sh runs first
 docker build -t send_to_x3:e2e send_to_x3          # needed once before -b docker
-python e2e/run_e2e.py -f releases -b docker        # what check_all.sh runs second
+python e2e/run_e2e.py -f releases,fork -b docker   # what check_all.sh runs second
 python e2e/run_e2e.py                              # mock backend: a stand-in app, for working on the harness itself
 ```
 
-`--build` builds missing simulators first. On a slow or busy Mac,
+`--build` runs `build_sim.sh` (and `build_wire.sh` where W1 runs) for every firmware
+a selected scenario uses; each does nothing when its build is up to date. Without it, a
+simulator built from older patches or another `firmware/UPSTREAM` makes the scenario an
+error that says to rebuild. On a slow or busy Mac,
 `SENDTOX3_E2E_SLOWDOWN=2` doubles every wait in the button scripts.
 
 ### Where the simulator differs from a real X3
@@ -352,8 +395,10 @@ python e2e/run_e2e.py                              # mock backend: a stand-in ap
   X3's own HTTP code instead.
 - Wi-Fi joins instantly, the battery is always full, memory is a fake 1 MiB, and the
   X3's web server listens on the Mac only.
-- A restart of the firmware continues in the same process; scenarios never depend on
-  it. Waking from sleep starts a new process, like the real reboot.
+- On the stock simulators a restart of the firmware continues in the same process, and
+  no scenario depends on it. The Send to X3 firmware's simulator relaunches the
+  program like the X3's reboot, which S6 relies on. Waking from sleep starts a new
+  process, like the real reboot.
 
 ---
 
@@ -445,6 +490,7 @@ Levels 3, 4, the other docker tests and the install test only run on the Mac.
 | Not covered | Why it matters | Covered instead by |
 |---|---|---|
 | A real X3 | The real device has less memory, a slower processor, real Wi-Fi (sleep delivery needs at least 20% battery and the network it last joined), real deep sleep, and screen edges the harness does not know | Checklist sections [C](#c-x3-with-crosspoint-2x-the-plugin) to [F](#f-reading-on-the-x3) |
+| The Send to X3 firmware on a real X3 | Installing with SD Card Firmware Update, recovery mode and going back were worked out from the firmware source; opening books and the reboot into the reader ran only in the simulator (fake memory, a patched restart) | Section [M](#m-the-send-to-x3-firmware-optional) |
 | A real iPhone running the Shortcut | Apple only lets its own apps run Shortcut actions; the tests check the file with Apple's WorkflowKit and run its logic in an interpreter, but never run it end to end | Section [G](#g-iphone) |
 | A real Android phone with HTTP Shortcuts | The import code is tested, but not the app on a phone (share sheet, local network permission) | Section [H](#h-android) |
 | Real Gmail | GreenMail stands in for it: Google's app passwords, labels, spam filtering and the DMARC results Google writes into each message are not tested | Section [J](#j-email-gmail) |
@@ -754,6 +800,45 @@ personal address to send from.
   appears.
 - [ ] K3. Read one PDF item on the X3 (section F). See [pdf.md](pdf.md) for what to
   expect from PDFs.
+
+### M. The Send to X3 firmware (optional)
+
+For an X3 that should read right from the plugin page. Follow
+[FIRMWARE.md](FIRMWARE.md); build the file first (level 3b).
+
+- [ ] M1. Note the **Firmware** row in **Settings > System > About** and keep the
+  official `.bin` of that version (FIRMWARE.md, "Before you start").
+- [ ] M2. Copy `firmware/dist/crosspoint-2.0.0-sx3+<hash>-x3-x4.bin` to the top level
+  of the SD card over **File Transfer** (**Upload** in the X3 web page's **File
+  Manager**). Then **Settings > System > SD Card Firmware Update**: the file is listed;
+  selecting it shows **Update firmware?**; **Confirm** shows a progress bar and the X3
+  restarts by itself. **About** shows `2.0.0-sx3+<hash>`. Books, settings and the saved
+  Wi-Fi are still there.
+- [ ] M3. Install the plugin over Wi-Fi from the Setup page. The third log line reads
+  `Confirm opens the book: this X3's firmware opens catalog downloads in the reader.`
+- [ ] M4. Share a note. In **Home > Plugins > Send to X3** the button on **Get 1 new**
+  says **Open**. Press it: **Downloading...**, a short **Loading**, and the book opens
+  in the reader. The web UI shows `fetch` right away (no **not confirmed yet**).
+- [ ] M5. Read a few pages of the M4 book and go back to Home. Open it again from
+  Home's recent books or the **Library**: it opens on the page where you stopped.
+  Then open the plugin and press **Open** on that item's own row (below the first
+  row): **Downloading...**, then it opens at page 1 (a separate file named after the
+  item), and its **On the X3** column gains `catalog`. Read a few pages, go back to
+  Home, open the plugin and press **Open** on the same row again: no
+  **Downloading...**, it opens on the page where you stopped, and no new `catalog`
+  time appears.
+- [ ] M6. **Open** on **Nothing new right now** shows **Download failed**.
+- [ ] M7. Share 9 or more items without fetching them. Page through the catalog with
+  **Next Page**: every item appears once, no row repeats at the top of page 2, and
+  there is no empty last page.
+- [ ] M8. Recovery mode: with the X3 asleep, hold the side **Up** button and press
+  **Power**. Note which button worked (FIRMWARE.md could not say for sure). The
+  firmware picker (**Select firmware file (.bin)**) opens; **Recovery Mode** shows in
+  the header after you select a file. **Back** only reopens the picker, so select the
+  Send to X3 file (still on the card) and **Confirm**; the X3 restarts normally.
+- [ ] M9. Go back: put the official `.bin` on the card and install it the same way.
+  **About** shows the official version; the button in the plugin says **Fetch** again
+  and **Get N new** still works.
 
 ### L. Clean up
 

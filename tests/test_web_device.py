@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from sendtox3.delivery import PAGE_SIZE
 from sendtox3.ingest import Processor
 from sendtox3.web.app import create_app
 
@@ -77,6 +78,138 @@ async def test_catalog_bad_params_use_defaults(client, store):
         add_item(store, f"Item {i}", created_at=1000 + i)
     rows = (await (await client.get("/device/v1/catalog?page=x&limit={limit}", headers=AUTH)).json())["items"]
     assert len(rows) == 9
+
+
+# What each CrossPoint build sends for the browse URL and when it shows Next Page
+# (docs/ARCHITECTURE.md §7.2; PluginCatalogPaging.h and PluginCatalogActivity::substituted):
+# - "2.0.0rc" (and develop 3f387a9): {page}, {limit} = page_size + 1, {offset} left as the
+#   literal text; Next Page after a lookahead row.
+# - "develop" (8f4d035 and the Send to X3 firmware) with this device.json: {offset} =
+#   (page - 1) * page_size, {limit} = page_size + 1; Next Page after a lookahead row.
+# - "develop-0.2.0-plugin": the same firmware with a device.json from 0.2.0 (no {offset}):
+#   {limit} = page_size, no lookahead row; Next Page after a full page.
+OLD_BROWSE_URL = "http://h/device/v1/catalog?page={page}&limit={limit}"
+FIRMWARES = ("2.0.0rc", "develop", "develop-0.2.0-plugin")
+
+
+def _browse_template(firmware: str, opts) -> tuple[str, int]:
+    from urllib.parse import urlsplit
+
+    from sendtox3.plugin_bundle import build_device_json
+
+    browse = build_device_json(base_url="http://h", device_token="device-test-token", opts=opts)["browse"]
+    url = OLD_BROWSE_URL if firmware == "develop-0.2.0-plugin" else browse["url"]
+    parts = urlsplit(url)
+    return f"{parts.path}?{parts.query}", browse["page_size"]
+
+
+async def _browse_like(firmware: str, client, opts, max_pages: int = 10) -> list[list[str]]:
+    """The row ids the X3 shows on each page, following Next Page to the end."""
+    from yarl import URL
+
+    template, size = _browse_template(firmware, opts)
+    pages: list[list[str]] = []
+    for page in range(1, max_pages + 1):
+        lookahead = firmware == "2.0.0rc" or "{offset}" in template
+        url = template.replace("{page}", str(page)).replace("{limit}", str(size + 1 if lookahead else size))
+        if firmware != "2.0.0rc":
+            url = url.replace("{offset}", str((page - 1) * size))
+        # Sent byte for byte, so 2.0.0rc's "offset={offset}" reaches the app unencoded.
+        resp = await client.session.get(URL(str(client.make_url("/")).rstrip("/") + url, encoded=True),
+                                        headers=AUTH)
+        assert resp.status == 200, url
+        rows = (await resp.json())["items"]
+        pages.append([r["id"] for r in rows[:size]])
+        if not (len(rows) > size if lookahead else len(rows) >= size):
+            return pages
+    raise AssertionError(f"{firmware}: more than {max_pages} pages")
+
+
+@pytest.mark.parametrize("firmware", FIRMWARES)
+@pytest.mark.parametrize("n", [0, 7, 8, 9, 15, 20])
+async def test_catalog_pages_on_every_firmware(client, store, opts, firmware, n):
+    """Every row exactly once, in order, the first row on page 1 only, on every firmware;
+    the only flaw left is develop with a 0.2.0 plugin: an empty last page when the rows
+    fill whole pages (reinstalling the plugin removes it)."""
+    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(n)]
+    pages = await _browse_like(firmware, client, opts)
+    shown = [row for page in pages for row in page]
+    assert shown[1:] == [it.id for it in reversed(items)], pages  # none missing, none twice
+    assert shown[0] == pages[0][0] and (shown[0].startswith("all-") if n else shown[0] == "none")
+    assert not any(r.startswith("all-") or r == "none" for r in shown[1:])
+    rows = n + 1  # the first row and the items
+    if firmware == "develop-0.2.0-plugin" and rows % PAGE_SIZE == 0:
+        assert len(pages) == rows // PAGE_SIZE + 1 and pages[-1] == [], pages
+    else:
+        assert all(pages) and len(pages) == -(-rows // PAGE_SIZE), pages
+
+
+@pytest.mark.parametrize("offset", ["{offset}", "%7Boffset%7D", "", "-8", "8.0", "٨", "x"])
+async def test_catalog_offset_must_be_ascii_digits(client, store, offset):
+    """Anything but plain digits (2.0.0rc's literal "{offset}", a sign, an Arabic-Indic
+    digit) is ignored: the page and limit decide."""
+    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(12)]
+    rows = (await (await client.get(f"/device/v1/catalog?page=2&limit=9&offset={offset}", headers=AUTH)).json())
+    assert [r["id"] for r in rows["items"]] == [it.id for it in reversed(items)][7:]
+
+
+async def test_catalog_offset_wins_and_huge_values_are_empty(client, store):
+    items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(12)]
+    newest = [it.id for it in reversed(items)]
+    rows = (await (await client.get("/device/v1/catalog?page=1&limit=9&offset=8", headers=AUTH)).json())["items"]
+    assert [r["id"] for r in rows] == newest[7:]  # the offset counts the first row
+    rows = (await (await client.get("/device/v1/catalog?page=3&limit=9&offset=0", headers=AUTH)).json())["items"]
+    assert rows[0]["id"].startswith("all-") and [r["id"] for r in rows[1:]] == newest[:8]
+    # 4301 digits and more: int() refuses them (ValueError), which used to be a 500.
+    for big in ("9" * 19, "9" * 20, "9" * 40, str(1 << 63), "9" * 4300, "9" * 4301, "9" * 5000):
+        resp = await client.get(f"/device/v1/catalog?page=1&limit=9&offset={big}", headers=AUTH)
+        assert resp.status == 200 and (await resp.json()) == {"items": []}, len(big)
+    resp = await client.get(f"/device/v1/catalog?page={'9' * 40}&limit=9", headers=AUTH)
+    assert resp.status == 200 and (await resp.json()) == {"items": []}
+
+
+@pytest.mark.parametrize("query,old", [
+    ("page=1&limit=8", True),  # develop c3b16da+ (the Send to X3 firmware too) with a 0.2.0 device.json
+    ("page=2&limit=8", True),
+    ("page=1&limit=9&offset=0", False),  # the same firmware with this version's device.json
+    ("page=2&limit=9&offset=8", False),
+    ("page=1&limit=9&offset={offset}", False),  # 2.0.0rc with this version's device.json
+    ("page=1&limit=9", False),  # 2.0.0rc with a 0.2.0 device.json: nothing to tell from it
+    ("page=1&limit=8&offset=0", False),
+])
+async def test_catalog_warns_about_a_plugin_from_0_2_0(client, store, app_state_from, query, old):
+    from yarl import URL
+
+    from sendtox3.web.device_api import OLD_PLUGIN_WARNING
+
+    for i in range(12):
+        add_item(store, f"Item {i}", created_at=1000 + i)
+    resp = await client.session.get(URL(str(client.make_url("/device/v1/catalog")) + "?" + query, encoded=True),
+                                    headers=AUTH)
+    assert resp.status == 200 and (await resp.json())["items"]
+    st = app_state_from(client).channel_status("device_api")
+    if old:
+        assert st["state"] == "warning" and st["detail"] == OLD_PLUGIN_WARNING
+        assert "install it again from Setup" in st["detail"] and "Open" in st["detail"]
+    else:
+        assert st["state"] == "ok" and "catalog page" in st["detail"]
+
+
+async def test_old_plugin_warning_stays_until_the_new_device_json_is_seen(client, store, app_state_from):
+    """The download that follows a catalog page must not hide the warning."""
+    from sendtox3.web.device_api import OLD_PLUGIN_WARNING
+
+    it = add_item(store, "Pick me")
+    status = lambda: app_state_from(client).channel_status("device_api")  # noqa: E731
+    await client.get("/device/v1/catalog?page=1&limit=8", headers=AUTH)
+    assert (await client.get(f"/device/v1/items/{it.id}.epub?confirm=1", headers=AUTH)).status == 200
+    st = status()
+    assert st["state"] == "warning" and st["detail"].startswith(OLD_PLUGIN_WARNING) and "Pick me" in st["detail"]
+    await client.get("/device/v1/catalog?page=1&limit=9&offset=0", headers=AUTH)  # reinstalled
+    assert status()["state"] == "ok"
+    assert (await client.get(f"/device/v1/items/{it.id}.epub?confirm=1", headers=AUTH)).status == 200
+    st = status()
+    assert st["state"] == "ok" and "Pick me" in st["detail"]
 
 
 async def test_catalog_empty(client):

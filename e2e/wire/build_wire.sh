@@ -23,16 +23,26 @@ die() { echo "build_wire: $*" >&2; exit 1; }
 [ -f "$FW/src/util/PluginEvents.cpp" ] || die "$REF has no plugin system (src/util/PluginEvents.cpp missing)"
 SIM_SHA="$(sed -n 's/.*"simulator_commit": "\([0-9a-f]*\)".*/\1/p' "$INFO")"
 VERSION="$(sed -n 's/.*"firmware_version": "\([^"]*\)".*/\1/p' "$INFO")"
-SIM="$WORK/simulator/${SIM_SHA:0:12}/src"
+# The simulator worktree this ref was built with: fork's is the patched
+# simulator/<sha12>-<patch hash>, not the plain simulator/<sha12> that only develop
+# creates. Older build-info.json files do not record it and fall back to the plain one
+# (either serves here: only HalStorage.cpp and the headers are used).
+SIM_DIR="$(sed -n 's/.*"simulator_dir": "\([^"]*\)".*/\1/p' "$INFO")"
+SIM="${SIM_DIR:-$WORK/simulator/${SIM_SHA:0:12}}/src"
 SDK="$FW/freeink-sdk/libs"
 AJ="$FW/.pio/libdeps/simulator_x3/ArduinoJson/src"
-[ -d "$SIM" ] || die "simulator sources missing at $SIM"
+[ -d "$SIM" ] || die "simulator sources missing at $SIM (run e2e/sim/build_sim.sh $REF again)"
 [ -d "$AJ" ] || die "ArduinoJson missing at $AJ (build the simulator first)"
 
 CXX="${CXX:-c++}"
 FLAGS=(-std=gnu++2a -O1 -g -Wall -Wno-unused-parameter -Wno-unused-function
        -D_LIBCPP_DISABLE_AVAILABILITY -DSIMULATOR "-DCROSSPOINT_VERSION=\"$VERSION\""
        -DARDUINOJSON_ENABLE_ARDUINO_STRING=1 -DDESTRUCTOR_CLOSES_FILE=1)
+# develop (c3b16da) chooses {limit} by the browse template's paging style and fills
+# {offset}; mirror that for checkouts that have it.
+if grep -q 'limitFor' "$FW/src/activities/plugins/PluginCatalogPaging.h" 2>/dev/null; then
+  FLAGS+=(-DWIRE_PAGING_STYLES=1)
+fi
 if [ "$(uname -s)" = "Darwin" ]; then
   # Same Command Line Tools quirk as build_sim.sh: a stale CLT libc++ include dir.
   SDKROOT="$(xcrun --show-sdk-path)"

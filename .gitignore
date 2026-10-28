@@ -9,3 +9,4 @@ e2e/work/
 .DS_Store
 .mypy_cache/
 .ruff_cache/
+/firmware/dist/

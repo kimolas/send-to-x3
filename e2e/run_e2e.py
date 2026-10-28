@@ -3,13 +3,18 @@
 
     python e2e/run_e2e.py                          # every scenario, every built firmware, mock backend
     python e2e/run_e2e.py -s S1,S2 -f 2.0.0rc      # a subset
+    python e2e/run_e2e.py -f releases,fork         # the releases plus the Send to X3 firmware
     python e2e/run_e2e.py --backend local          # the real app (python -m sendtox3)
     python e2e/run_e2e.py --list
 
-Simulators come from ``e2e/sim/build_sim.sh <ref>`` (``--build`` runs it for missing
-ones). Results: a table on stdout and ``<out>/report.json``; every run keeps its SD
-card, serial log, screenshots (PNG) and the recorded HTTP exchanges under
-``<out>/<scenario>-<firmware>/``. Exit status 0 only when nothing failed.
+Simulators come from ``e2e/sim/build_sim.sh <ref>``; ``--build`` runs it (and
+``e2e/wire/build_wire.sh`` for W1) first, which rebuilds only what changed. A scenario
+on a simulator built from other patches or another base commit than this checkout has
+(``firmware/patches``, ``firmware/UPSTREAM``, ``e2e/sim/patches``) is an error, not a
+pass. Results: a table on stdout and ``<out>/report.json`` (with each simulator's
+build-info.json); every run keeps its SD card, serial log, screenshots (PNG) and the
+recorded HTTP exchanges under ``<out>/<scenario>-<firmware>/``. Exit status 0 only when
+nothing failed.
 """
 
 from __future__ import annotations
@@ -37,14 +42,16 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="CrossPoint firmware e2e scenarios")
     ap.add_argument("-s", "--scenario", default="all", help="comma-separated ids (default: all)")
     ap.add_argument("-f", "--firmware", default="releases",
-                    help=f"comma-separated refs ({', '.join(FIRMWARES)}), 'releases' ({', '.join(RELEASES)}) or 'all'")
+                    help=f"comma-separated refs ({', '.join(FIRMWARES)}) and/or 'releases' ({', '.join(RELEASES)}), "
+                         "or 'all'")
     ap.add_argument("-b", "--backend", choices=("mock", "local", "docker"), default="mock")
     ap.add_argument("--bundle", choices=("auto", "app", "spec"), default="auto",
                     help="plugin bundle generator: the app's plugin_bundle, the §10 template, or auto")
     ap.add_argument("--python", default=DEFAULT_PYTHON, help="interpreter for the backend process")
     ap.add_argument("--docker-image", default="send_to_x3:e2e", help="image for --backend docker")
     ap.add_argument("--out", type=Path, default=None, help="results dir (default: $SENDTOX3_E2E_WORK/runs/<time>)")
-    ap.add_argument("--build", action="store_true", help="build missing simulators first")
+    ap.add_argument("--build", action="store_true",
+                    help="run build_sim.sh (and build_wire.sh for W1) first; each rebuilds only what changed")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--json", action="store_true", help="print the report JSON instead of the table")
     return ap.parse_args(argv)
@@ -53,21 +60,26 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def select(spec: str, known: list[str], what: str) -> list[str]:
     if spec == "all":
         return known
-    if spec == "releases" and what == "firmware":
-        return list(RELEASES)
-    picked = [x.strip() for x in spec.split(",") if x.strip()]
+    picked: list[str] = []
+    for x in (x.strip() for x in spec.split(",")):
+        names = list(RELEASES) if x == "releases" and what == "firmware" else [x] if x else []
+        picked += [y for y in names if y not in picked]
     unknown = [x for x in picked if x not in known]
     if unknown:
         raise SystemExit(f"unknown {what}: {', '.join(unknown)} (known: {', '.join(known)})")
     return picked
 
 
-def ensure_built(refs: list[str]) -> None:
+def ensure_built(scenarios: list[str], refs: list[str]) -> None:
+    """Build what the selected scenarios run on. Always runs the scripts: their stamps
+    make an up-to-date build a no-op, and a present binary may predate a patch edit."""
     for ref in refs:
-        try:
-            runner.find_program(ref)
-        except FileNotFoundError:
-            subprocess.run(["bash", str(REPO / "e2e" / "sim" / "build_sim.sh"), ref], check=True)
+        runs_on = [sid for sid in scenarios if ref in REGISTRY[sid].firmwares]
+        if not runs_on:
+            continue
+        subprocess.run(["bash", str(REPO / "e2e" / "sim" / "build_sim.sh"), ref], check=True)
+        if "W1" in runs_on:
+            subprocess.run(["bash", str(REPO / "e2e" / "wire" / "build_wire.sh"), ref], check=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     scenarios = select(a.scenario, list(REGISTRY), "scenario")
     refs = select(a.firmware, list(FIRMWARES), "firmware")
     if a.build:
-        ensure_built(refs)
+        ensure_built(scenarios, refs)
     out = (a.out or runner.work_dir() / "runs" / time.strftime("%Y%m%d-%H%M%S")).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
@@ -89,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         for ref in refs:
             if ref not in sc.firmwares:
                 continue
-            res = Result(scenario=sid, firmware=ref, backend=a.backend)
+            res = Result(scenario=sid, firmware=ref, backend=a.backend, build=runner.build_info(ref))
             ctx = Context(fw=firmware(ref), backend_kind=a.backend, out=out / f"{sid}-{ref}", result=res,
                           python=a.python, bundle_source=a.bundle, docker_image=a.docker_image)
             ctx.out.mkdir(parents=True, exist_ok=True)

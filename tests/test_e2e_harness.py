@@ -31,16 +31,18 @@ if str(REPO) not in sys.path:
 from e2e import mock_backend  # noqa: E402
 from e2e.scenarios import REGISTRY  # noqa: E402
 from e2e.scenarios.backends import BackendConfig, MockBackend  # noqa: E402
-from e2e.scenarios.base import epub_info, valid_epub  # noqa: E402
+from e2e.scenarios.base import Context, Result, Scenario, SkipScenario, epub_info, execute, valid_epub  # noqa: E402
 from e2e.scenarios.wiretap import WireTap, parse_requests, parse_responses  # noqa: E402
 from e2e.sim import images, runner, sd  # noqa: E402
-from e2e.sim.firmware import FIRMWARES, firmware  # noqa: E402
+from e2e.sim.firmware import FIRMWARES, HOME_RECENT_ROWS, firmware  # noqa: E402
 from e2e.sim.nav import Nav, Waits  # noqa: E402
 from e2e.sim.runner import InputScript  # noqa: E402
 from e2e.wire import wire  # noqa: E402
 
 FW2 = firmware("2.0.0rc")
 FW1 = firmware("1.6.5")
+DEV = firmware("develop")
+FORK = firmware("fork")
 
 
 # ---------------------------------------------------------------------------------------
@@ -72,6 +74,56 @@ def test_unknown_firmware():
         firmware("9.9.9")
     assert set(FIRMWARES) >= {"2.0.0rc", "1.6.5"}
     assert not FW2.cold_sleep_delivery and FIRMWARES["3f387a9"].cold_sleep_delivery
+
+
+def test_develop_and_fork_profiles():
+    """Every plugin build sends limit=9 with the app's device.json; only develop and the
+    fork fill in {offset}; only the fork opens downloads and relaunches on restart."""
+    plugin_builds = [f for f in FIRMWARES.values() if f.plugins]
+    assert {f.ref for f in plugin_builds} == {"2.0.0rc", "3f387a9", "develop", "fork"}
+    assert all(f.catalog_limit == 9 for f in plugin_builds)
+    assert FW2.catalog_query() == "page=1&limit=9&offset={offset}"
+    assert firmware("3f387a9").catalog_query(2) == "page=2&limit=9&offset={offset}"
+    assert DEV.catalog_query() == "page=1&limit=9&offset=0" and DEV.catalog_query(3) == "page=3&limit=9&offset=16"
+    assert FORK.catalog_query(2) == DEV.catalog_query(2)
+    assert [f.ref for f in FIRMWARES.values() if f.opens_after_download] == ["fork"]
+    assert [f.ref for f in FIRMWARES.values() if f.sim_restart] == ["fork"]
+    assert FORK.base == "develop" and DEV.cold_sleep_delivery and FORK.cold_sleep_delivery
+    assert FORK.version == DEV.version == "2.0.0" and FORK.epub_reader_activity == "EpubReader"
+
+
+def test_build_sim_pins_match_the_firmware_dir():
+    """build_sim.sh's develop pin is the fork's base (firmware/UPSTREAM), both on the newer
+    simulator; the fork's simulator patches are the ones in e2e/sim/patches."""
+    script = (REPO / "e2e" / "sim" / "build_sim.sh").read_text()
+    upstream = (REPO / "firmware" / "UPSTREAM").read_text()
+    commit = next(ln.split("=", 1)[1].strip() for ln in upstream.splitlines() if ln.startswith("COMMIT="))
+    assert f'DEVELOP_SHA="{commit}"' in script
+    assert 'develop|fork|8f4d035*) SIM_REF="5b380779ddea5f1549f649eab0480e69e30a77b6"' in script
+    assert '2.0.0rc) SIM_REF="1777fe2f1da1405cf5ecf191b831734e8862a92f"' in script
+    assert sorted(p.name for p in (REPO / "e2e" / "sim" / "patches" / "simulator").glob("*.patch")) == [
+        "0001-real-software-restart.patch"]
+    out = subprocess.run(["bash", str(REPO / "e2e" / "sim" / "build_sim.sh"), "--help"], capture_output=True,
+                         text=True, timeout=30)
+    assert out.returncode == 0 and "--fw-patch" in out.stdout and "--sim-patch" in out.stdout
+    bad = subprocess.run(["bash", str(REPO / "e2e" / "sim" / "build_sim.sh"), "--fw-patch", "/no/such.patch",
+                          "fork"], capture_output=True, text=True, timeout=30)
+    assert bad.returncode != 0 and "no such patch file" in bad.stderr
+
+
+def test_simulator_restart_patch_matches_the_runner():
+    """The patch speaks the runner's protocol: the opt-in variable, the after-restart
+    schedules, the relaunch and restore lines; and the listening sockets close on exec."""
+    patch = (REPO / "e2e" / "sim" / "patches" / "simulator" / "0001-real-software-restart.patch").read_text()
+    for needle in ('"CROSSPOINT_SIM_RESTART"', '"CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART"',
+                   '"CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART"', "[SIM] software restart: relaunching (rtc %zu bytes)",
+                   "[SIM] software restart: boot %s, restored %zu/%zu rtc bytes"):
+        assert needle in patch
+    assert runner._RELAUNCH_RE.match("[SIM] software restart: relaunching (rtc 4124 bytes)")
+    files = [ln.split(" b/")[1] for ln in patch.splitlines() if ln.startswith("diff --git ")]
+    assert {"src/WebServer.cpp", "src/WebSocketsServer.cpp", "src/CrossPointWebServer.cpp", "src/Arduino.h",
+            "src/SimulatorLifecycle.cpp", "src/esp_system.h", "src/simulator_main.cpp"} <= set(files)
+    assert patch.count("F_SETFD, FD_CLOEXEC") == 3
 
 
 def test_input_script_schedule():
@@ -129,6 +181,30 @@ def test_nav_home_and_plugin(tmp_path):
         Nav(FW1, InputScript()).open_opds()
 
 
+def test_nav_on_the_fork_never_dismisses():
+    """On the fork Confirm opens the book, so there is no "Download complete" to dismiss,
+    and the fetch waits for the book to open."""
+    w = Waits()
+    s = InputScript(start_ms=0, gap_ms=200)
+    Nav(FORK, s, waits=w).catalog_fetch(0)
+    s.press("ENTER")
+    assert s.input_spec() == f"0:ENTER;{w.download + w.open_book}:ENTER"
+    with pytest.raises(ValueError, match="no \"Download complete\""):
+        Nav(FORK, InputScript(), waits=w).dismiss()
+    s2 = InputScript(start_ms=0, gap_ms=200)
+    Nav(DEV, s2, waits=w).catalog_fetch(0).dismiss()
+    assert s2.input_spec() == f"0:ENTER;{w.download}:ENTER"
+    # After a book was opened, Home lists one recent book above its menu.
+    s3 = InputScript(start_ms=0, gap_ms=200)
+    Nav(FORK, s3, recent_books=HOME_RECENT_ROWS, waits=w).home("plugins")
+    assert [x.split(":")[1] for x in s3.input_spec().split(";")] == ["DOWN"] * 3 + ["ENTER"]
+    # A device.json without download.open (S1 on the fork): the stock "Download complete".
+    s4 = InputScript(start_ms=0, gap_ms=200)
+    Nav(FORK, s4, catalog_opens=False, waits=w).catalog_fetch(0).dismiss()
+    assert s4.input_spec() == s2.input_spec()
+    assert not Nav(DEV, InputScript(), catalog_opens=True).catalog_opens  # develop never reads the key
+
+
 def test_nav_open_file_uses_card_order(tmp_path):
     card = sd.build_sd(tmp_path / "sd", FW2, files={
         "/Inbox/b10.txt": "x", "/Inbox/b9.txt": "x", "/Inbox/A.epub": "x", "/Inbox/notes.pdf": "x",
@@ -158,15 +234,31 @@ def test_natural_less(a, b, less):
 # ---------------------------------------------------------------------------------------
 
 
+def test_spec_device_json_contract():
+    """The browse URL pages on every firmware (``{offset}`` for develop, the literal text
+    elsewhere), downloads ask to open (the fork) and nothing else changed."""
+    for auto in (False, True):
+        dj = sd.spec_device_json("http://h:1", "tok", auto_delivery=auto)
+        assert dj["browse"]["url"] == "http://h:1/device/v1/catalog?page={page}&limit={limit}&offset={offset}"
+        assert dj["browse"]["page_size"] == sd.PAGE_SIZE == mock_backend.PAGE_SIZE == 8
+        assert dj["download"]["open"] is True
+        assert dj["download"]["url"] == "http://h:1/device/v1/items/{id}.epub" + ("" if auto else "?confirm=1")
+        assert list(dj["download"]) == ["url", "headers", "dest_dir", "filename", "open"]
+        assert list(dj["events"]) == (["sleep.enter"] if auto else ["book.downloaded"])
+
+
 def test_spec_bundle_matches_the_app_by_default():
     """The §10 template the harness falls back to is the app's default plugin: download
-    report and ``?confirm=1``, no sleep delivery."""
+    report and ``?confirm=1``, no sleep delivery; the same browse URL, ``download.open``
+    and page size."""
+    from sendtox3 import delivery
     from sendtox3.config import Options
     from sendtox3.plugin_bundle import build_device_json
 
     for auto in (False, True):
         assert sd.spec_device_json("http://h:1", "tok", auto_delivery=auto) == build_device_json(
             base_url="http://h:1", device_token="tok", opts=Options(auto_delivery=auto))
+    assert getattr(delivery, "PAGE_SIZE", None) == sd.PAGE_SIZE
 
 
 def test_build_sd_formats(tmp_path):
@@ -189,6 +281,20 @@ def test_build_sd_formats(tmp_path):
     assert card.outbox() == []
     card.path(card.plugin_dir + "/events.jsonl").write_text('{"e":"sleep.enter","id":"a-1"}\nnot json\n')
     assert card.outbox() == [{"e": "sleep.enter", "id": "a-1"}, {"_unparsed": "not json"}]
+
+
+def test_build_sd_edits_device_json(tmp_path):
+    """``device_json`` edits the installed manifest: S1 drops download.open on the fork."""
+    bundle = sd.spec_bundle_zip("http://127.0.0.1:9", "tok")
+    card = sd.build_sd(tmp_path / "sd", FORK, bundle=bundle, device_json=sd.drop_download_open)
+    dj = json.loads(card.path(card.plugin_dir + "/device.json").read_text())
+    assert "open" not in dj["download"]
+    assert dj == {**sd.spec_device_json("http://127.0.0.1:9", "tok"),
+                  "download": {k: v for k, v in sd.spec_device_json("http://127.0.0.1:9", "tok")["download"].items()
+                               if k != "open"}}
+    sd.drop_download_open({})  # nothing to drop
+    with pytest.raises(ValueError, match="needs a plugin"):
+        sd.build_sd(tmp_path / "sd2", FORK, device_json=sd.drop_download_open)
 
 
 def test_build_sd_165_has_no_plugin_keys(tmp_path):
@@ -439,6 +545,32 @@ def test_mock_catalog_paging_and_downloads(mock):
     assert json.loads(body)["items"][2]["subtitle"].startswith("Read on X3")
 
 
+def test_mock_catalog_paging_guard(mock):
+    """offset when it is a number (develop); else (page-1)*limit for limit == 8 (develop with
+    an old device.json); else (page-1)*(limit-1) (2.0.0rc/3f387a9 send the literal {offset},
+    which the simulator's curl turns into "offset"). Every case lists the same rows."""
+    base, srv, _ = mock
+    ids = [_ingest(base, title=f"Item {i}", text=f"Body {i}")["id"] for i in range(20)]
+    auth = {"Authorization": "Bearer dev"}
+    rows = ["get"] + ids[::-1]  # the "Get 20 new" row, then newest first
+
+    def page(query):
+        st, body, _ = _req(base + "/device/v1/catalog?" + query, headers=auth)
+        assert st == 200
+        got = [r["id"] for r in json.loads(body)["items"]]
+        return ["get" if i.startswith("all-") else i for i in got]
+
+    for p in (1, 2, 3):
+        want = rows[(p - 1) * 8:(p - 1) * 8 + 9]
+        assert page(f"page={p}&limit=9&offset={(p - 1) * 8}") == want  # develop, the fork
+        assert page(f"page={p}&limit=9&offset=%7Boffset%7D") == want  # 2.0.0rc, 3f387a9
+        assert page(f"page={p}&limit=9&offset=offset") == want  # the same through curl
+        assert page(f"page={p}&limit=9") == want  # a 0.2.0 device.json
+        assert page(f"page={p}&limit=8") == rows[(p - 1) * 8:p * 8]  # develop with a 0.2.0 device.json
+    assert page("page=1&limit=9&offset=-1") == rows[:9]  # not all digits: ignored
+    assert page("page=3&limit=9&offset=20") == rows[20:]
+
+
 def test_mock_fetch_row(mock):
     base, srv, _ = mock
     auth = {"Authorization": "Bearer dev"}
@@ -449,6 +581,7 @@ def test_mock_fetch_row(mock):
     ids = [_ingest(base, title=f"F{i}", text="x")["id"] for i in range(2)]
     top = json.loads(_req(base + "/device/v1/catalog?page=1&limit=9", headers=auth)[1])["items"][0]
     assert top["title"].startswith("Get 2 new · ") and top["id"].startswith("all-")
+    assert top["subtitle"] == "Everything new in one book · 2 words: F1; F0"  # as the app words it: newest first
     st, d1, _ = _req(base + f"/device/v1/items/{top['id']}.epub", headers=auth)
     assert st == 200 and epub_info(d1)["chapters"] == 2
     assert _req(base + f"/device/v1/items/{top['id']}.epub", headers=auth)[1] == d1  # repeats are identical
@@ -608,14 +741,34 @@ def test_mock_backend_process(tmp_path):
 
 
 def test_registry_and_cli():
-    assert {"S1", "S2", "S3", "S4", "S5", "W1"} <= set(REGISTRY)
+    assert {"S1", "S2", "S3", "S4", "S5", "S6", "W1"} <= set(REGISTRY)
     assert set(REGISTRY["S3"].firmwares) >= {"2.0.0rc", "1.6.5"}
+    assert all(set(sc.firmwares) <= set(FIRMWARES) for sc in REGISTRY.values())
+    assert REGISTRY["S6"].firmwares == ("fork",)
+    # S1 runs the fork's stock path (a device.json without download.open); S6 its open path.
+    assert {"develop", "fork"} <= set(REGISTRY["S1"].firmwares)
+    assert {"develop", "fork"} <= set(REGISTRY["W1"].firmwares)
     out = subprocess.run([sys.executable, str(REPO / "e2e" / "run_e2e.py"), "--list"], capture_output=True,
                          text=True, timeout=60)
     assert out.returncode == 0 and "S1" in out.stdout and "W1" in out.stdout
     bad = subprocess.run([sys.executable, str(REPO / "e2e" / "run_e2e.py"), "-s", "S9"], capture_output=True,
                          text=True, timeout=60)
     assert bad.returncode != 0 and "unknown scenario" in bad.stderr
+
+
+def test_run_e2e_firmware_selection():
+    sys.path.insert(0, str(REPO / "e2e"))
+    try:
+        import run_e2e
+    finally:
+        sys.path.remove(str(REPO / "e2e"))
+    known = list(FIRMWARES)
+    assert run_e2e.select("releases", known, "firmware") == ["2.0.0rc", "1.6.5"]
+    assert run_e2e.select("releases,fork", known, "firmware") == ["2.0.0rc", "1.6.5", "fork"]
+    assert run_e2e.select("develop, 2.0.0rc,releases", known, "firmware") == ["develop", "2.0.0rc", "1.6.5"]
+    assert run_e2e.select("all", known, "firmware") == known
+    with pytest.raises(SystemExit, match="unknown firmware: 9.9"):
+        run_e2e.select("fork,9.9", known, "firmware")
 
 
 def test_run_e2e_skips_missing_simulator(tmp_path):
@@ -625,6 +778,112 @@ def test_run_e2e_skips_missing_simulator(tmp_path):
     report = json.loads(out.stdout)
     assert out.returncode == 0 and report["results"][0]["status"] == "skip"
     assert "build_sim.sh 1.6.5" in report["results"][0]["error"]
+    assert report["results"][0]["build"] == {}  # no build-info.json either
+
+
+def _fake_build(work: Path, ref: str, **info) -> Path:
+    """A work dir with ``bin/<ref>/program`` and the build-info.json build_sim.sh writes."""
+    out = work / "bin" / ref
+    out.mkdir(parents=True)
+    (out / "program").write_text("#!/bin/sh\nexit 0\n")
+    (out / "program").chmod(0o755)
+    (out / "build-info.json").write_text(json.dumps({"name": ref, "firmware_ref": ref, **info}))
+    return out
+
+
+def _blobs(folder: Path) -> list[dict]:
+    return [{"file": p.name, "blob": runner._blob(p)} for p in sorted(folder.glob("*.patch"))]
+
+
+def test_build_provenance(tmp_path, monkeypatch):
+    """A fork simulator counts as current only when it was built from firmware/UPSTREAM
+    and exactly the patches in firmware/patches and e2e/sim/patches/simulator."""
+    monkeypatch.setenv("SENDTOX3_E2E_WORK", str(tmp_path))
+    fw_patches = _blobs(REPO / "firmware" / "patches")
+    sim_patches = _blobs(REPO / "e2e" / "sim" / "patches" / "simulator")
+    want = runner.expected_build("fork")
+    assert fw_patches and want["firmware_patches"] == [p["blob"] for p in fw_patches]
+    assert want["firmware_patches"][0] == subprocess.run(
+        ["git", "hash-object", str(sorted((REPO / "firmware" / "patches").glob("*.patch"))[0])],
+        capture_output=True, text=True, check=True).stdout.strip()
+    commit = want["firmware_commit"]
+    assert len(commit) == 40 and runner.expected_build("develop") == {
+        "firmware_patches": [], "simulator_patches": [], "firmware_commit": commit}
+    assert runner.expected_build("2.0.0rc") == {"firmware_patches": [], "simulator_patches": []}
+
+    assert runner.stale_build("fork") == ["no build-info.json"]
+    _fake_build(tmp_path, "fork", firmware_commit=commit, firmware_patches=fw_patches,
+                simulator_patches=sim_patches)
+    assert runner.stale_build("fork") == []
+    runner.check_build("fork")
+    assert runner.build_info("fork")["firmware_commit"] == commit
+
+    old = [{**fw_patches[0], "blob": "0" * 40}] + fw_patches[1:]
+    (tmp_path / "bin" / "fork" / "build-info.json").write_text(json.dumps(
+        {"firmware_commit": "1" * 40, "firmware_patches": old, "simulator_patches": []}))
+    why = runner.stale_build("fork")
+    assert len(why) == 3 and "expected " + commit[:12] in why[0] and "firmware/patches (built 00000000" in why[1]
+    assert "e2e/sim/patches/simulator (built none" in why[2]
+    with pytest.raises(runner.StaleBuild, match="build_sim.sh fork, or pass --build"):
+        runner.check_build("fork")
+
+    # Context.program: missing -> skip, stale -> an error result, never a silent pass.
+    ctx = Context(fw=FORK, backend_kind="mock", out=tmp_path / "o", result=Result("X", "fork", "mock"),
+                  python=sys.executable)
+    res = execute(Scenario("X", "x", lambda c: c.check("ran", bool(c.program)), ("fork",)), ctx)
+    assert res.status == "error" and "StaleBuild" in res.error and not res.checks
+    ctx2 = Context(fw=DEV, backend_kind="mock", out=tmp_path / "o2", result=Result("X", "develop", "mock"),
+                   python=sys.executable)
+    with pytest.raises(SkipScenario, match="build_sim.sh develop"):
+        ctx2.program
+
+
+def test_run_e2e_build_always_runs_the_stamped_scripts(monkeypatch, tmp_path):
+    """--build runs build_sim.sh for every firmware a selected scenario runs on (it is a
+    no-op when up to date), and build_wire.sh where W1 runs, even if a binary exists."""
+    sys.path.insert(0, str(REPO / "e2e"))
+    try:
+        import run_e2e
+    finally:
+        sys.path.remove(str(REPO / "e2e"))
+    monkeypatch.setenv("SENDTOX3_E2E_WORK", str(tmp_path))
+    _fake_build(tmp_path, "fork")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(run_e2e.subprocess, "run", lambda argv, check: calls.append(argv[1:]))
+    run_e2e.ensure_built(["S6", "W1"], ["1.6.5", "develop", "fork"])
+    sim, wire_ = str(REPO / "e2e" / "sim" / "build_sim.sh"), str(REPO / "e2e" / "wire" / "build_wire.sh")
+    assert calls == [[sim, "develop"], [wire_, "develop"], [sim, "fork"], [wire_, "fork"]]
+    calls.clear()
+    run_e2e.ensure_built(["S5"], ["3f387a9", "1.6.5"])  # S5 does not run on 3f387a9
+    assert calls == [[sim, "1.6.5"]]
+
+
+def test_build_wire_uses_the_recorded_simulator_dir(tmp_path):
+    """build_sim.sh records the simulator worktree (fork's is the patched one), and
+    build_wire.sh compiles against it instead of assuming the unpatched simulator/<sha12>."""
+    script = (REPO / "e2e" / "sim" / "build_sim.sh").read_text()
+    assert '"simulator_dir": sim_dir' in script and '"$SIM_SHA" "$SIM_DIR"' in script
+    work = tmp_path / "work"
+    (work / "fw" / "fork" / "src" / "util").mkdir(parents=True)
+    (work / "fw" / "fork" / "src" / "util" / "PluginEvents.cpp").write_text("")
+    patched = work / "simulator" / "5b380779ddea-e8af7369"
+    out = _fake_build(work, "fork", firmware_version="2.0.0", simulator_commit="5b380779ddea" + "0" * 28,
+                      simulator_dir=str(patched))
+    env = dict(os.environ, SENDTOX3_E2E_WORK=str(work))
+    run = subprocess.run(["bash", str(REPO / "e2e" / "wire" / "build_wire.sh"), "fork"], capture_output=True,
+                         text=True, timeout=30, env=env)
+    assert run.returncode != 0 and f"simulator sources missing at {patched}/src" in run.stderr
+    (patched / "src").mkdir(parents=True)  # now only ArduinoJson is missing
+    run = subprocess.run(["bash", str(REPO / "e2e" / "wire" / "build_wire.sh"), "fork"], capture_output=True,
+                         text=True, timeout=30, env=env)
+    assert run.returncode != 0 and "ArduinoJson missing" in run.stderr
+    # An older build-info.json without simulator_dir: the unpatched worktree.
+    info = json.loads((out / "build-info.json").read_text())
+    del info["simulator_dir"]
+    (out / "build-info.json").write_text(json.dumps(info))
+    run = subprocess.run(["bash", str(REPO / "e2e" / "wire" / "build_wire.sh"), "fork"], capture_output=True,
+                         text=True, timeout=30, env=env)
+    assert f"simulator sources missing at {work}/simulator/5b380779ddea/src" in run.stderr
 
 
 def test_wire_result_parsing(tmp_path):
@@ -688,6 +947,71 @@ def test_run_sim_with_fake_program(tmp_path):
                        env={"CROSSPOINT_SIM_HTTP_MOCK_ROOT": "/tmp"})
 
 
+_RESTARTING_PROGRAM = """#!/bin/sh
+# Stands in for a simulator with the restart patch: boot 1 restarts into the reader.
+if [ -z "$CROSSPOINT_SIM_BOOT" ]; then
+  echo "[1] [DBG] [ACT] Entering activity: Home"
+  echo "[2] [DBG] [ACT] Entering activity: PluginCatalog"
+  echo "[3] [DBG] [MAIN] Silent restart (target=reader)"
+  [ "$CROSSPOINT_SIM_RESTART" = exec ] || { echo "[4] [DBG] [ACT] Entering activity: EpubReader"; exit 0; }
+  echo "[SIM] software restart: relaunching (rtc 8 bytes)"
+  CROSSPOINT_SIM_BOOT=1 CROSSPOINT_SIM_INPUT_SCRIPT="$CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART" \
+    CROSSPOINT_SIM_SCREENSHOTS="$CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART" exec "$0"
+fi
+echo "[SIM] software restart: boot 1, restored 8/8 rtc bytes"
+echo "[1] [DBG] [ACT] Entering activity: EpubReader"
+echo "INPUT=$CROSSPOINT_SIM_INPUT_SCRIPT"
+shot="${CROSSPOINT_SIM_SCREENSHOTS#*:}"
+printf 'BM' > "$shot"
+"""
+
+
+def test_run_sim_restart_splits_boots(tmp_path):
+    prog = tmp_path / "program"
+    prog.write_text(_RESTARTING_PROGRAM)
+    prog.chmod(0o755)
+    s = InputScript(start_ms=0)
+    s.press("ENTER").shot("catalog").quit()
+    after = InputScript(start_ms=100)
+    after.press("DOWN").shot("reader").quit()
+    res = runner.run_sim(prog, tmp_path / "sd", s, tmp_path / "out", restart="exec", after_restart=after,
+                         png=False, timeout_s=20)
+    assert res.returncode == 0 and not res.timed_out
+    assert res.env["CROSSPOINT_SIM_RESTART"] == "exec"
+    assert res.env["CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART"] == after.input_spec()
+    assert after.input_spec().startswith("100:DOWN;")
+    assert res.env["CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART"].endswith("/shots/reader.bmp")
+    assert len(res.boots()) == 2 and len(res.relaunched_at) == 1
+    assert res.activities() == ["Home", "PluginCatalog", "EpubReader"]
+    assert res.activities(boot=0) == ["Home", "PluginCatalog"] and res.activities(boot=1) == ["EpubReader"]
+    assert res.activities(boot=-1) == ["EpubReader"] and res.activities(boot=5) == []
+    assert res.entered("EpubReader", boot=1) and not res.entered("EpubReader", boot=0)
+    assert res.silent_restarts() == ["reader"] and res.silent_restarts(boot=1) == []
+    assert f"INPUT={after.input_spec()}" in res.boots()[1]  # the relaunch runs the after-restart schedule
+    assert res.shots["reader"].taken and not res.shots["catalog"].taken
+    assert res.summary()["boots"] == 2
+
+    # Without restart="exec" the restart continues in the same process (upstream).
+    plain = runner.run_sim(prog, tmp_path / "sd", s, tmp_path / "out2", png=False, timeout_s=20)
+    assert len(plain.boots()) == 1 and plain.activities() == ["Home", "PluginCatalog", "EpubReader"]
+    assert "CROSSPOINT_SIM_RESTART" not in plain.env and plain.relaunched_at == []
+
+
+def test_run_sim_restart_arguments(tmp_path):
+    prog = tmp_path / "program"
+    prog.write_text("#!/bin/sh\nexit 0\n")
+    prog.chmod(0o755)
+    with pytest.raises(ValueError, match="needs restart"):
+        runner.run_sim(prog, tmp_path / "sd", InputScript(), tmp_path / "o", after_restart=InputScript())
+    with pytest.raises(ValueError, match="restart must be"):
+        runner.run_sim(prog, tmp_path / "sd", InputScript(), tmp_path / "o", restart="reboot")
+    a, b = InputScript(), InputScript()
+    a.shot("x")
+    b.shot("x")
+    with pytest.raises(ValueError, match="unique"):
+        runner.run_sim(prog, tmp_path / "sd", a, tmp_path / "o", restart="exec", after_restart=b)
+
+
 def test_run_sim_timeout_kills(tmp_path):
     prog = tmp_path / "program"
     prog.write_text("#!/bin/sh\nsleep 60\n")
@@ -705,7 +1029,7 @@ needs_sim = pytest.mark.skipif(os.environ.get("SENDTOX3_E2E_SIM") != "1",
 
 
 @needs_sim
-@pytest.mark.parametrize("scenario,ref", [("S1", "2.0.0rc"), ("S3", "1.6.5"), ("W1", "2.0.0rc")])
+@pytest.mark.parametrize("scenario,ref", [("S1", "2.0.0rc"), ("S3", "1.6.5"), ("W1", "2.0.0rc"), ("S6", "fork")])
 def test_firmware_scenario(tmp_path, scenario, ref):
     out = subprocess.run([sys.executable, str(REPO / "e2e" / "run_e2e.py"), "-s", scenario, "-f", ref,
                           "--out", str(tmp_path), "--json"], capture_output=True, text=True, timeout=600)

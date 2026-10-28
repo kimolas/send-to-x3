@@ -22,7 +22,8 @@ from e2e.wire import wire
 from .base import Context, SkipScenario, scenario, valid_epub
 
 
-@scenario("W1", "wire harness: real device HTTP client against the backend", firmwares=("2.0.0rc", "3f387a9"))
+@scenario("W1", "wire harness: real device HTTP client against the backend",
+          firmwares=("2.0.0rc", "3f387a9", "develop", "fork"))
 def run(ctx: Context) -> None:
     try:
         binary = wire.find_binary(ctx.fw.ref)
@@ -47,8 +48,8 @@ def run(ctx: Context) -> None:
     ctx.check("catalog: one request", len(reqs) == 1, [r.start_line for r in reqs])
     if reqs:
         r = reqs[0]
-        ctx.check("catalog: request line", r.start_line == "GET /device/v1/catalog?page=1&limit=9 HTTP/1.1",
-                  r.start_line)
+        line = f"GET /device/v1/catalog?{ctx.fw.catalog_query()} HTTP/1.1"
+        ctx.check(f"catalog: request line {line}", r.start_line == line, r.start_line)
         names = [k for k, _ in r.headers]
         ctx.check("catalog: headers are Host, User-Agent, Connection, Authorization",
                   names == ["Host", "User-Agent", "Connection", "Authorization"], r.headers)

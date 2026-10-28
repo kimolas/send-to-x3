@@ -37,12 +37,14 @@ from .models import CHANNELS, IngestRequest, Item
 
 log = logging.getLogger(__name__)
 
-#: A title stays reserved this long after an item with it was downloaded through a
-#: channel that names the file after the title (catalog, OPDS): a later item with the
-#: same title would otherwise overwrite that file (and its reading progress) on the X3.
-ISSUED_TITLE_DAYS = 365
-#: Channels whose downloads are saved on the X3 as ``<title>.<ext>``.
-TITLE_NAMED_CHANNELS = ("catalog", "opds")
+#: Channels whose downloads are saved on the X3 as ``<title>.<ext>`` (LAN push into
+#: ``push_folder``, by default the catalog's ``/Inbox``). Their titles stay reserved for
+#: good (``issued_titles``), even after the item is deleted or pruned: the file stays on
+#: the X3, so a later item with the same title would replace it (and its reading
+#: progress) on stock firmware, and on the Send to X3 firmware (``download.open``) its
+#: catalog row would open the old file instead of downloading the new one. Nothing
+#: tells the app when the file leaves the card, so a reservation never expires.
+TITLE_NAMED_CHANNELS = ("catalog", "opds", "push")
 #: Permissions of everything in the data folder: it holds the generated tokens.
 DIR_MODE = 0o700
 FILE_MODE = 0o600
@@ -56,7 +58,10 @@ FETCH_SENT_PREFIX = "fetch-sent:"
 FETCH_RETIRED_PREFIX = "fetch-retired:"
 #: ``fetch-names:<key>`` = every title the bundle was listed under (a JSON list).
 FETCH_NAMES_PREFIX = "fetch-names:"
-_ISSUED_BACKFILL_KEY = "migration:issued_titles_backfill"
+#: One-time migrations of ``issued_titles``: kv key -> the channels whose earlier
+#: downloads it reserves (LAN push joined :data:`TITLE_NAMED_CHANNELS` in 0.3.0).
+_ISSUED_BACKFILLS = (("migration:issued_titles_backfill", ("catalog", "opds")),
+                     ("migration:issued_titles_backfill_push", ("push",)))
 _STALE_TMP_SECONDS = 3600
 
 _SCHEMA = """
@@ -253,36 +258,39 @@ class Store:
                 pass
 
     def _backfill_issued_titles(self) -> None:
-        """One-time migration: items downloaded through the catalog or OPDS before
-        ``issued_titles`` existed reserve their titles too (their files are on the X3)."""
-        if self.kv_get(_ISSUED_BACKFILL_KEY):
-            return
-        cutoff = int(time.time()) - ISSUED_TITLE_DAYS * 86400
-        with self._lock:
-            rows = self._db.execute("SELECT title, delivered FROM items WHERE delivered!='{}'").fetchall()
-            found: dict[str, tuple[str, int]] = {}
-            for title, delivered in rows:
+        """One-time migrations: items downloaded through a channel of
+        :data:`TITLE_NAMED_CHANNELS` before it reserved titles reserve them too (their
+        files are on the X3). An item pushed under a numbered name (``Title (2).epub``)
+        reserves only its title: the database never recorded the name on the card."""
+        for done_key, wanted in _ISSUED_BACKFILLS:
+            if self.kv_get(done_key):
+                continue
+            with self._lock:
+                rows = self._db.execute("SELECT title, delivered FROM items WHERE delivered!='{}'").fetchall()
+                found: dict[str, tuple[str, int]] = {}
+                for title, delivered in rows:
+                    try:
+                        channels = json.loads(delivered or "{}")
+                        when = max(int(channels[c]) for c in wanted if c in channels)
+                    except (ValueError, TypeError, AttributeError):  # max() of nothing, bad JSON
+                        continue
+                    key = _title_key(title)
+                    if when > found.get(key, ("", -1))[1]:
+                        found[key] = (title, when)
+                self._db.execute("BEGIN")
                 try:
-                    channels = json.loads(delivered or "{}")
-                    when = max(int(channels[c]) for c in TITLE_NAMED_CHANNELS if c in channels)
-                except (ValueError, TypeError, AttributeError):  # max() of nothing, bad JSON
-                    continue
-                key = _title_key(title)
-                if when >= cutoff and when > found.get(key, ("", -1))[1]:
-                    found[key] = (title, when)
-            self._db.execute("BEGIN")
-            try:
-                self._db.executemany(
-                    "INSERT OR IGNORE INTO issued_titles (key, title, issued_at) VALUES (?, ?, ?)",
-                    [(k, t, w) for k, (t, w) in found.items()],
-                )
-                self._db.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (_ISSUED_BACKFILL_KEY, "1"))
-                self._db.execute("COMMIT")
-            except BaseException:
-                self._db.execute("ROLLBACK")
-                raise
-        if found:
-            log.info("reserved %d title(s) of items downloaded before this version", len(found))
+                    self._db.executemany(
+                        "INSERT OR IGNORE INTO issued_titles (key, title, issued_at) VALUES (?, ?, ?)",
+                        [(k, t, w) for k, (t, w) in found.items()],
+                    )
+                    self._db.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (done_key, "1"))
+                    self._db.execute("COMMIT")
+                except BaseException:
+                    self._db.execute("ROLLBACK")
+                    raise
+            if found:
+                log.info("reserved %d title(s) of items downloaded (%s) before this version",
+                         len(found), ", ".join(wanted))
 
     def close(self) -> None:
         with self._lock:
@@ -408,14 +416,15 @@ class Store:
             return {r[0] for r in self._db.execute("SELECT title FROM items").fetchall()}
 
     def issued_titles(self) -> set[str]:
-        """Titles of items downloaded as ``<title>.<ext>`` (catalog, OPDS) in the last
-        :data:`ISSUED_TITLE_DAYS` days, including items deleted or pruned since: a new
-        item must not reuse them, or its download would replace that file on the X3."""
+        """Names of files saved on the X3 as ``<title>.<ext>`` (catalog, OPDS, LAN push,
+        "Get N new" bundles), including those of items deleted or pruned since: a new
+        item must not reuse them (see :data:`TITLE_NAMED_CHANNELS`). Never expire."""
         with self._lock:
             return {r[0] for r in self._db.execute("SELECT title FROM issued_titles").fetchall()}
 
     def prune(self, retention_days: int, now: Optional[int] = None) -> int:
-        """Delete items and stored deliveries older than ``retention_days``."""
+        """Delete items and stored deliveries older than ``retention_days``. Reserved
+        titles stay (:meth:`issued_titles`): their files may still be on the X3."""
         now = int(now or time.time())
         cutoff = now - retention_days * 86400
         with self._lock:
@@ -424,7 +433,6 @@ class Store:
             self._db.executemany("DELETE FROM kv WHERE k=?", [(_AUTO_SKIP_PREFIX + i,) for i in ids])
             old = self._db.execute("SELECT n, file FROM deliveries WHERE created_at<?", (cutoff,)).fetchall()
             self._db.execute("DELETE FROM deliveries WHERE created_at<?", (cutoff,))
-            self._db.execute("DELETE FROM issued_titles WHERE issued_at<?", (now - ISSUED_TITLE_DAYS * 86400,))
             # Titles of bundles no longer stored, and sent bundles never confirmed.
             for prefix in (FETCH_TITLE_PREFIX, FETCH_NAMES_PREFIX):
                 self._db.execute(
@@ -514,7 +522,8 @@ class Store:
                                     (ev_glob, ts)).fetchone() is not None
 
     def issue_title(self, title: str, when: Optional[int] = None) -> None:
-        """Reserve ``title`` as the name of a file now on the X3 (see :meth:`issued_titles`)."""
+        """Reserve ``title`` as the name (without extension) of a file now on the X3 (see
+        :meth:`issued_titles`)."""
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO issued_titles (key, title, issued_at) VALUES (?, ?, ?)",
                              (_title_key(title), title, int(when or time.time())))

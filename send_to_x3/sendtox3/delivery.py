@@ -7,8 +7,14 @@ Firmware facts this module is built around (CrossPoint 2.x, see docs/ARCHITECTUR
   2xx (even an empty body) as success; retries reuse the same ``(event.id, event.ts)``.
   So a repeat of a known ``(ev, ts)`` must get byte-identical output, and "nothing new"
   must be a 404 (``build_auto_delivery`` returns ``None``).
-- The catalog sends ``limit = page_size + 1`` and uses the extra row to detect a next
-  page, so the offset is ``(page - 1) * (limit - 1)``.
+- The catalog pages in one of three ways (browse URL
+  ``?page={page}&limit={limit}&offset={offset}``): 2.0.0rc and develop 3f387a9 send
+  ``limit = page_size + 1`` and the literal text ``{offset}``, and use the extra row to
+  detect a next page, so the start is ``(page - 1) * (limit - 1)``; develop c3b16da
+  (2026-10-27) and later (and the Send to X3 firmware) send the same limit and
+  ``offset = (page - 1) * page_size``; with a device.json from 0.2.0 (no ``{offset}``)
+  they send ``limit = page_size`` and no lookahead row, so the start is
+  ``(page - 1) * limit``. Old firmware never sends ``limit = page_size``.
 - Catalog downloads resume with Range requests after a dropped connection, so a "Get N
   new" bundle is built once, stored, and served byte-identical until it is replaced.
 
@@ -48,8 +54,12 @@ AUTO_CAP_BYTES = 900_000
 #: A single item larger than the digest cap is still sent alone up to this size; the
 #: device aborts event downloads above 1,048,576 bytes and would retry forever.
 SINGLE_MAX_BYTES = 1_000_000
-#: ``{limit}`` is page_size + 1 with page_size clamped to 1..16 by the firmware.
+#: Rows per catalog page: the plugin's ``browse.page_size`` (plugin_bundle).
+PAGE_SIZE = 8
+#: ``{limit}`` is page_size + 1 (or page_size) with page_size clamped to 1..16 by the firmware.
 LIMIT_MIN, LIMIT_MAX = 2, 17
+#: The first row a page may start at; larger values cannot be stored by SQLite.
+START_MAX = 1 << 31
 
 DOC_FILE = "doc.json"
 _DOC_VERSION = 1
@@ -376,8 +386,9 @@ def fetch_title(items: list[Item]) -> str:
 
 def _unique_fetch_title(store: Store, base: str) -> str:
     """``base``, or ``base (2)``, ``(3)``, ...: never the name of a file the X3 already got
-    from the catalog or OPDS (a later bundle would replace that file and reset its reading
-    position), nor the title of an item, which may still be downloaded under that name."""
+    from the catalog, OPDS or LAN push (a later bundle would replace that file and reset its
+    reading position, or on the Send to X3 firmware open it instead), nor the title of an
+    item, which may still be downloaded under that name."""
     taken = {title_key(t) for t in store.issued_titles() | store.titles_in_use()}
     # Titles of other bundles still listed or stored (in either format) are taken too.
     taken |= {title_key(t) for t in store.kv_prefixed(FETCH_TITLE_PREFIX).values()}
@@ -726,19 +737,29 @@ def clamp_paging(page: int, limit: int) -> tuple[int, int]:
     return max(1, int(page)), min(LIMIT_MAX, max(LIMIT_MIN, int(limit)))
 
 
-def catalog_page(store: Store, page: int, limit: int, *, fmt: str = "epub") -> dict:
+def catalog_page(store: Store, page: int, limit: int, *, offset: Optional[int] = None,
+                 fmt: str = "epub") -> dict:
     """``{"items": [{"id", "title", "subtitle"}]}``: the :func:`fetch_entry` row first,
     then every item, newest first.
 
-    Returns up to ``limit`` rows of that list starting at ``(page - 1) * (limit - 1)``.
+    Returns up to ``limit`` rows of that list starting at ``offset`` when the firmware
+    sent one (develop c3b16da and later), else at ``(page - 1) * limit`` for
+    ``limit == PAGE_SIZE`` (the same firmware with a 0.2.0 device.json: no lookahead
+    row), else at ``(page - 1) * (limit - 1)`` (2.0.0rc, 3f387a9: one lookahead row).
     """
     page, limit = clamp_paging(page, limit)
-    offset = (page - 1) * (limit - 1)
-    if offset == 0:
+    if offset is not None:
+        start = max(0, int(offset))
+    elif limit == PAGE_SIZE:
+        start = (page - 1) * limit
+    else:
+        start = (page - 1) * (limit - 1)
+    start = min(start, START_MAX)
+    if start == 0:
         rows = [fetch_entry(store, fmt)]
         rows += [catalog_entry(it) for it in store.list_items(offset=0, limit=limit - 1, newest_first=True)]
         return {"items": rows}
-    items = store.list_items(offset=offset - 1, limit=limit, newest_first=True)
+    items = store.list_items(offset=start - 1, limit=limit, newest_first=True)
     return {"items": [catalog_entry(it) for it in items]}
 
 

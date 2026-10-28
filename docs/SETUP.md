@@ -6,7 +6,7 @@ Plan about an hour. You do each part once.
 | Part | What you do | Needed for |
 |---|---|---|
 | [1](#part-1-give-the-pi-and-the-x3-fixed-addresses) | Give the Pi and the X3 fixed addresses in your router | Everything |
-| [2](#part-2-check-and-maybe-update-the-x3-firmware) | Check the X3 firmware, update it if you want the plugin | Choosing Part 5a or 5b |
+| [2](#part-2-check-and-maybe-update-the-x3-firmware) | Check the X3 firmware, update it if you want the plugin (or the Send to X3 firmware, to read right from it) | Choosing Part 5a or 5b |
 | [3](#part-3-install-the-send-to-x3-app-in-home-assistant) | Install the Send to X3 app in Home Assistant | Everything |
 | [4](#part-4-configure-the-app-and-check-the-setup-page) | Check the options and the app's Setup page | Everything |
 | [5a](#part-5a-x3-with-crosspoint-2x-the-plugin) | X3 on CrossPoint 2.x: install the plugin | 2.x |
@@ -35,7 +35,8 @@ Plan about an hour. You do each part once.
   Most routers broadcast 2.4 and 5 GHz under one name, which is fine.
 - **Access to your router's admin page** (for Part 1).
 - A **phone** (iPhone/iPad or Android) on the same Wi-Fi, and a **computer** with a web
-  browser. To update the X3 firmware you need Chrome or Edge and a USB-C data cable.
+  browser. To update the X3 firmware with the web flasher you need Chrome or Edge and a
+  USB-C data cable (installing from the SD card needs neither; see Part 2.3).
 - A **Mac** only if you want the ready-made iPhone shortcut (otherwise you build it by
   hand in 10 minutes, see Part 7).
 - Optional: a **new Gmail account** for sending by email (Part 6).
@@ -91,6 +92,7 @@ screen. It is also the **Firmware** row in **Settings > System > About**.
 |---|---|---|
 | `1.6.5` | Stable release. No plugins. | Part 5b (OPDS and/or LAN push). Updating is optional. |
 | Starting with `2.0.0` | CrossPoint 2.x with plugins. | Part 5a. |
+| `2.0.0-sx3+` and a code | The Send to X3 firmware (2.x with plugins, see 2.2). | Part 5a. |
 | Anything older than 1.6.5 | Not tested with Send to X3. | Update (2.3). |
 
 Note: a 2.0.0rc build may show extra characters after `2.0.0` (for example an `-rc`
@@ -103,16 +105,26 @@ suffix); that is still 2.x.
 | **1.6.5** (stable) | No plugins. You fetch items with the X3's **OPDS Browser**, and/or the app copies new items onto the X3 whenever its **File Transfer** screen is open (LAN push). Perfectly usable. |
 | **2.0.0rc** (prerelease, 2026-10-19) | The **Send to X3 plugin**: open it on the X3 and press Confirm on the first row, **Get 3 new**, to download everything you shared since last time as one book, or pick single items from the list below it. Nothing arrives by itself. (Delivery at sleep is an option with a caveat on 2.0.0rc; see [Part 5a step 7](#step-7-optional-automatic-delivery-at-sleep).) |
 | **A newer 2.x build** (develop commit `facaa87`, 2026-10-23, or any later release or nightly) | The same plugin. The optional delivery at sleep also works with no taps. |
+| **The Send to X3 firmware** (CrossPoint develop of 2026-10-28 plus one change; version `2.0.0-sx3+...`) | The same plugin, and you read right from it: the button on **Get 3 new** says **Open**, and pressing it downloads the book and opens it in the reader. **Open** again on a single item's row opens the copy that row saved where you left off. You build it on your Mac and install it from the SD card: see [The Send to X3 firmware](FIRMWARE.md). |
 
-Staying on 1.6.5 is fine. If you do, skip to Part 3.
+Staying on 1.6.5 is fine. If you do, skip to Part 3. The Send to X3 firmware is
+optional too; you can install it at any time later, and go back.
 
 ### 2.3 Flash CrossPoint 2.0.0rc or later (high level)
 
-The CrossPoint project's own instructions are the reference: see "Install firmware" in
-the [CrossPoint README](https://github.com/crosspoint-reader/crosspoint-reader#install-firmware).
+For the Send to X3 firmware follow [its own guide](FIRMWARE.md) instead: it is
+installed from the SD card, with no cable. (The SD card route also works for an
+official release file: put it on the card and use **Settings > System > SD Card
+Firmware Update**; see that guide.)
+
+For an official release, the CrossPoint project's own instructions are the reference:
+see "Install firmware" in the
+[CrossPoint README](https://github.com/crosspoint-reader/crosspoint-reader#install-firmware).
 In short:
 
-1. Charge the X3. As a precaution, copy the contents of its SD card to your computer.
+1. Charge the X3. As a precaution, copy the whole SD card to your computer, including
+   the hidden `.crosspoint` folder with your settings and reading positions (a Mac:
+   [The Send to X3 firmware, Before you start](FIRMWARE.md#before-you-start), item 3).
 2. Download the X3 firmware file for the version you want from the
    [CrossPoint releases page](https://github.com/crosspoint-reader/crosspoint-reader/releases)
    (2.0.0rc is marked as a pre-release).
@@ -363,6 +375,7 @@ screen now has a **Plugins** row.
    ```
    Connecting to the X3 at 192.168.1.60 ...
    Found X3 running CrossPoint 2.0.0...
+   Confirm downloads; install the Send to X3 firmware to open books directly (docs/FIRMWARE.md).
    /Inbox is ready.
    Wrote /.crosspoint/plugins/sendtox3/device.json (... bytes ...).
    Wrote /.crosspoint/plugins/sendtox3/manifest.json (... bytes ...).
@@ -370,15 +383,22 @@ screen now has a **Plugins** row.
    Done: the plugin is installed. Leave File Transfer, then open Home > Plugins > Send to X3 ...
    ```
 
+   The third line says what **Confirm** does on this X3. On the
+   [Send to X3 firmware](FIRMWARE.md) it reads `Confirm opens the book: this X3's
+   firmware opens catalog downloads in the reader.` instead.
+
    If the last line starts with `Error:`, see
    [Troubleshooting](TROUBLESHOOTING.md#installing-the-plugin).
 4. On the X3 press **« Exit**. The X3 restarts to the Home screen; that is normal.
 
-**Alternative: copy the plugin to the SD card.** On the Setup page select **Download
-SD-card plugin bundle (zip)** (`sendtox3-sd-card.zip`). Put the X3's SD card into your
-computer and extract the zip at the **top level** of the card. It contains a hidden
-folder `.crosspoint/plugins/sendtox3` and an `Inbox` folder. A Mac's Finder hides
-folders that start with a dot, so use Terminal:
+**Alternative: copy the plugin to the SD card.** If the plugin is already on the X3 (a
+reinstall), first go back to Home and open **Home > Plugins > Send to X3** once, so the
+X3 reports your last fetch: the bundle empties the X3's queue of reports. (The install
+over Wi-Fi does not need this.) On the Setup page select **Download SD-card plugin
+bundle (zip)** (`sendtox3-sd-card.zip`). Put the X3's SD card into your computer and
+extract the zip at the **top level** of the card. It contains a hidden folder
+`.crosspoint/plugins/sendtox3` and an `Inbox` folder. A Mac's Finder hides folders
+that start with a dot, so use Terminal:
 
 ```sh
 unzip -o ~/Downloads/sendtox3-sd-card.zip -d "/Volumes/<name of the card>"
@@ -418,8 +438,18 @@ the device token, so download it again if either changes.
    (Had the download been cancelled, it would be offered again, as **Get 1 new · ...
    (2)**.)
 
+**On the [Send to X3 firmware](FIRMWARE.md)** steps 4 to 6 are shorter: the button
+says **Open**. Pressing it shows **Downloading...**, then a short **Loading** message;
+the X3 restarts straight into **Test note**. The web UI already shows `fetch`: the X3
+reported the file before it opened it. Pressing **Open** again on a row whose book is
+already on the X3 (the same file in `/Inbox`) opens it where you left off, without
+downloading it again. To go back to a **Get N new** book, open it from Home or the
+**Library**: **Open** on one of its items' own rows downloads a separate copy of that
+item, which starts at page 1.
+
 **Every day from now on:** share from your phone; when you want to read it, on the X3
-open **Home > Plugins > Send to X3**, press **Confirm** on the first row, then go back.
+open **Home > Plugins > Send to X3**, press **Confirm** on the first row, then go back
+(on the Send to X3 firmware the book opens by itself).
 Several new items arrive as one book with a chapter per item (one new item keeps its
 own title). To get a single item again, select it in the list below the first row (it
 then shows `catalog`).
@@ -479,6 +509,13 @@ and the **Channels** box shows a warning.
 plugin has delivery at sleep built in and cannot report saved files. If you saved the
 app's **Configuration** under 0.1.0, it may still have **Also deliver when the X3
 sleeps** on (it was the default then): turn it off, **Save** and **Restart** first.
+
+**If you set up version 0.2.0:** reinstall the plugin after updating (step 3). The
+0.2.0 plugin cannot open books on the Send to X3 firmware, and on newer CrossPoint
+builds its catalog can end with an empty page. Before reinstalling from the SD-card
+bundle, go back to Home and open **Home > Plugins > Send to X3** once, so the X3
+reports your last fetch; the bundle empties the X3's queue of reports. The install
+over Wi-Fi from the Setup page does not need this.
 
 **Reinstall the plugin (step 3) after changing** the server address or port, the
 device token, **Also deliver when the X3 sleeps**, **Download format** or **X3 inbox
@@ -757,6 +794,8 @@ Tick these off once:
       **Get 1 new**; pressing Confirm puts it in the Library. The web UI shows **sent
       ..., not confirmed yet**, then `fetch` once you went back to Home and opened the
       plugin again. Nothing new arrives without that (unless you turned on step 7).
+- [ ] **Send to X3 firmware (if used):** the button on **Get 1 new** says **Open**;
+      pressing it opens the book, and the web UI shows `fetch` straight away.
 - [ ] **2.x:** selecting a single item in the list below the first row works too.
 - [ ] **1.6.5:** **Home > OPDS Browser** lists your items; downloading one works.
 - [ ] **LAN push (if used):** opening **File Transfer > Join a Network** for half a

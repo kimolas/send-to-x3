@@ -7,7 +7,7 @@
 # tests/test_packaging.py enforces it. Add an option there first, then here, then
 # in translations/en.yaml and DOCS.md.
 name: "Send to X3"
-version: "0.2.0"
+version: "0.3.0"
 slug: send_to_x3
 description: "Share web pages, notes, emails and PDFs to an Xteink X3 e-reader as clean, image-free text"
 arch:

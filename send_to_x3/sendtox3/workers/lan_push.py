@@ -17,7 +17,8 @@ Guarantees:
   bookkeeping was lost in a crash or the item was requeued) is marked without uploading
   it again.
 - Name collisions: the firmware never overwrites, so a taken name becomes
-  ``Title (2).epub``, ``Title (3).epub``, ...
+  ``Title (2).epub``, ``Title (3).epub``, ... The name used stays reserved
+  (``Store.issue_title``), so no later item gets it as its title.
 - An item the device refuses (e.g. disk full, unwritable name) is not retried until the
   device next reappears, and never blocks the other items.
 - The worker never raises (except ``CancelledError``); errors land in the status dict.
@@ -25,7 +26,7 @@ Guarantees:
 State contract (duck-typed, see :class:`LanPushState`)::
 
     state.opts     Options  device_host, push_poll_seconds, push_folder, delivery_format
-    state.store    Store    pending_items(), get(), file_bytes(), mark_delivered()
+    state.store    Store    pending_items(), get(), file_bytes(), mark_delivered(), issue_title()
     state.status   dict     this worker owns state.status["lan_push"]:
         state: str           AppState contract: "waiting" (device away), "ok", "warning"
                              (some items refused), "error", "disabled"
@@ -66,6 +67,7 @@ from ..device_client import (
     numbered_name,
     sanitize_filename,
     sd_join,
+    split_ext,
 )
 
 if TYPE_CHECKING:
@@ -104,6 +106,13 @@ class PushResult:
 def push_filename(item: "Item", fmt: str) -> str:
     """Device file name for ``item``: its (already firmware-safe) title plus extension."""
     return sanitize_filename(item.title, fmt, fallback=f"Note {item.id}")
+
+
+def _reserve_name(store: "Store", name: str) -> None:
+    """Keep ``name`` (``Title.epub`` or a numbered ``Title (2).epub``) from ever becoming
+    a new item's title: a catalog download of that item would land on this file (and on
+    the Send to X3 firmware open it instead). ``mark_delivered`` reserves the title only."""
+    store.issue_title(split_ext(name)[0])
 
 
 async def _identical_copy(
@@ -170,6 +179,7 @@ async def push_items(
             break
         if copy is not None:
             store.mark_delivered(item.id, "push")
+            _reserve_name(store, copy.name)
             result.delivered.append((item.id, sd_join(folder, copy.name)))
             log.info("LAN push: %s already on the device as %s", item.id, copy.name)
             continue
@@ -191,6 +201,7 @@ async def push_items(
             result.failed[item.id] = str(exc)
             continue
         store.mark_delivered(item.id, "push")
+        _reserve_name(store, name)
         listing[name.casefold()] = DeviceFile(name, len(data), False, name.lower().endswith(".epub"))
         result.delivered.append((item.id, sd_join(folder, name)))
         result.uploaded += 1

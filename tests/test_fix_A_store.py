@@ -11,7 +11,7 @@ import pytest
 from sendtox3 import ingest
 from sendtox3.ingest import Processor, StorageError
 from sendtox3.models import IngestRequest, Item, new_item_id
-from sendtox3.store import ISSUED_TITLE_DAYS, Store
+from sendtox3.store import Store
 
 from test_web_fakes import install_fakes
 
@@ -67,16 +67,16 @@ async def test_title_never_downloaded_by_name_is_free_again(proc, store, web):
     assert (await proc.process(IngestRequest(text="https://example.com/n2"))).title == "Never Downloaded"
 
 
-def test_issued_titles_expire(store):
+def test_issued_titles_never_expire(store):
+    """Nothing tells the app when a file leaves the card, and on the Send to X3 firmware
+    Open on a reused title's row would open the old file instead of downloading."""
     it = store.add_item(Item(id=new_item_id(), created_at=1, kind="text", source="test", title="Old"),
                         epub=b"e", txt=b"t")
     store.mark_delivered(it.id, "catalog", when=1000)
     store.delete(it.id)
     assert store.issued_titles() == {"Old"}
-    store.prune(30, now=1000 + ISSUED_TITLE_DAYS * 86400 - 10)
+    store.prune(30, now=1000 + 10 * 366 * 86400)
     assert store.issued_titles() == {"Old"}
-    store.prune(30, now=1000 + ISSUED_TITLE_DAYS * 86400 + 10)
-    assert store.issued_titles() == set()
 
 
 # ---------------------------------------------------------------- finding 35

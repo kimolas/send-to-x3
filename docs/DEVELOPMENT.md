@@ -48,6 +48,9 @@ shortcuts/                      phone shortcuts
   dist/                         generated, unsigned iOS Shortcut and its XML form (committed)
   android/                      generated HTTP Shortcuts import file (committed)
   tools/                        checkers for the generated files
+firmware/                       the optional Send to X3 firmware (see firmware/README.md)
+  UPSTREAM  patches/            the pinned CrossPoint commit and the patch series on top
+  build.sh                      builds it in Docker; output in firmware/dist/ (gitignored)
 scripts/check_all.sh            runs every verification level
 docs/                           user and developer documentation
 .github/workflows/              tests.yml (CI), build.yml (images to GHCR)

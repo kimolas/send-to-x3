@@ -23,7 +23,7 @@ BENIGN_TXT_2X = "[SCT] Failed to load CSS from cache"
 
 
 @scenario("S5", "open delivered EPUB and TXT in the reader, screenshot pages 1-2",
-          firmwares=("2.0.0rc", "1.6.5"))
+          firmwares=("2.0.0rc", "1.6.5", "develop", "fork"))
 def run(ctx: Context) -> None:
     backend, _tap = ctx.start_backend()
     item = backend.seed(title=TITLE, text=LONG_TEXT)

@@ -1,7 +1,12 @@
 """S1: Plugins > Send to X3: the first row, "Get 2 new", lands everything new as one
 ``/Inbox/<row title>.epub``; the X3 confirms it at the next Wi-Fi join (its
 ``book.downloaded`` event), and only then the row reads "Nothing new right now"; single
-rows land ``/Inbox/<title>.epub``."""
+rows land ``/Inbox/<title>.epub``.
+
+On the Send to X3 firmware (``fork``) the card's device.json has no ``download.open``, as
+a 0.2.0 bundle or any other catalog: the patch reworks the stock download path (the
+destination is worked out before the request), which must still end in "Download
+complete" and never open the reader. S6 covers ``download.open``."""
 
 from __future__ import annotations
 
@@ -28,16 +33,23 @@ def _first_row(backend) -> dict:
     return json.loads(body)["items"][0] if status == 200 else {}
 
 
-@scenario("S1", "plugin catalog: \"Get N new\" (confirmed by the X3) + single downloads", firmwares=("2.0.0rc", "3f387a9"))
+@scenario("S1", "plugin catalog: \"Get N new\" (confirmed by the X3) + single downloads",
+          firmwares=("2.0.0rc", "3f387a9", "develop", "fork"))
 def run(ctx: Context) -> None:
     backend, tap = ctx.start_backend()
     seeded = [backend.seed(**s) for s in SEED]
     titles = [s["title"] for s in seeded]
     ctx.check("backend made titles firmware-safe", all(".." not in t and "/" not in t for t in titles), titles)
 
-    card = sdmod.build_sd(ctx.out / "sd", ctx.fw, bundle=backend.bundle_zip(source=ctx.bundle_source))
+    # Stock builds ignore download.open; the fork runs here without it (its stock path).
+    stock_path = sdmod.drop_download_open if ctx.fw.opens_after_download else None
+    card = sdmod.build_sd(ctx.out / "sd", ctx.fw, bundle=backend.bundle_zip(source=ctx.bundle_source),
+                          device_json=stock_path)
     ctx.check("bundle installed a plugin", card.plugin_dir is not None, card.plugin_dir or "")
     manifest = json.loads(card.path(f"{card.plugin_dir}/device.json").read_text("utf-8"))
+    if stock_path:
+        ctx.check(f"{ctx.fw.ref}: device.json without download.open (the stock download path)",
+                  "open" not in manifest.get("download", {}), manifest.get("download"))
     ctx.check("bundle has no sleep delivery (auto_delivery is off by default), only the download report",
               list(manifest.get("events") or {}) == ["book.downloaded"], manifest.get("events"))
     # What the X3 will list (the same new items always give the same "Get N new" row).
@@ -48,7 +60,7 @@ def run(ctx: Context) -> None:
 
     # Run 1: open the plugin and press Confirm on the first row.
     s = InputScript()
-    nav = Nav(ctx.fw, s)
+    nav = Nav(ctx.fw, s, catalog_opens=False)
     nav.open_plugin("Send to X3", plugin_titles=["Send to X3"])
     s.shot("catalog")
     nav.catalog_fetch(0)  # "Get 2 new"
@@ -58,7 +70,10 @@ def run(ctx: Context) -> None:
                                   stop_when=lambda: fetch_name in card.inbox_files(), stop_grace_ms=1500))
     ctx.check("opened the plugin catalog", run1.entered("PluginCatalog"), run1.activities())
     browse = tap.find("/device/v1/catalog")
-    ctx.check("browse request with page=1&limit=9", any("page=1&limit=9" in e.target for e in browse),
+    # The simulator fetches through the curl CLI, which globs the literal "{offset}" that
+    # builds before develop send into "offset" (W1 checks the device's own bytes).
+    query = ctx.fw.catalog_query().replace("{offset}", "offset")
+    ctx.check(f"browse request ?{ctx.fw.catalog_query()}", any(e.target.endswith("?" + query) for e in browse),
               [e.target for e in browse])
     ctx.check("browse sent the device token",
               all(e.request.header("Authorization") == f"Bearer {backend.device_token}" for e in browse) and browse)
@@ -92,7 +107,7 @@ def run(ctx: Context) -> None:
     # Run 2 (after the restart that leaving the catalog causes): opening the plugin joins
     # Wi-Fi, which sends the report before the list loads; then fetch the single rows.
     s = InputScript()
-    nav = Nav(ctx.fw, s)
+    nav = Nav(ctx.fw, s, catalog_opens=False)
     nav.open_plugin("Send to X3", plugin_titles=["Send to X3"])
     s.shot("catalog-after-confirm")
     s.presses("DOWN", 1)
@@ -138,5 +153,11 @@ def run(ctx: Context) -> None:
                       {"card": on_card.size, "served": len(body)})
             ctx.check(f"{name} is a well-formed EPUB container", valid_epub(card.path(f"/Inbox/{name}").read_bytes()))
     ctx.check("no unexpected files in /Inbox", set(inbox) == expected, sorted(inbox))
+    opened = [ln for r in (run1, run2) for ln in r.lines(tag="PCAT")
+              if "Opening in the reader" in ln or "Already on the card" in ln]
+    ctx.check("every Confirm downloaded and stayed in the catalog (no reader, no restart into it)",
+              not opened and not any(r.entered(ctx.fw.epub_reader_activity) for r in (run1, run2))
+              and "reader" not in run1.silent_restarts() + run2.silent_restarts(),
+              {"pcat": opened, "activities": run1.activities() + run2.activities()})
     errs = [ln for ln in run1.errors() + run2.errors() if "PCAT" in ln or "HTTP" in ln or "PEVT" in ln]
     ctx.check("no firmware errors about the downloads or the report", not errs, errs)

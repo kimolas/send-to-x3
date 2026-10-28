@@ -1,9 +1,10 @@
 # Send to X3 — architecture and contracts
 
 This is the design spec every component is built against. Firmware facts are from
-CrossPoint source read at tag `1.6.5` and at `2.0.0rc`/develop `3f387a9` (2026-10-25).
+CrossPoint source read at tag `1.6.5`, at `2.0.0rc`/develop `3f387a9` (2026-10-25) and
+at develop `8f4d035` (2026-10-28) with the Send to X3 firmware patch (§10.1).
 Everything else was checked against the code in `send_to_x3/sendtox3/` after the second
-review-fix round (2026-10-25).
+review-fix round (2026-10-25), and for 0.3.0 (2026-10-28) where §7.2 and §10 say so.
 
 ## 1. Goal
 
@@ -11,6 +12,8 @@ Share selected text, a URL, an email (body, link, or PDF attachment) from a phon
 computer, and have it show up on an Xteink X3 running **stock, unmodified CrossPoint**
 as clean, image-free text, with no cable. The X3 fetches only when the user asks: the
 first row of the plugin catalog, "Get N new", downloads everything new as one book.
+Optionally the X3 runs the **Send to X3 firmware** (CrossPoint develop plus one
+change, §10.1), where that press also opens the book in the reader.
 
 ## 2. Components
 
@@ -80,7 +83,8 @@ send_to_x3/                     the HA app (folder name = slug)
 tests/                          pytest unit + integration tests (no network)
 e2e/                            end-to-end harnesses (docker, firmware simulator, wire harness)
 shortcuts/                      iOS Shortcut generator, Android import file generator
-docs/                           user documentation
+firmware/                       the Send to X3 firmware: UPSTREAM pin, patches/, Docker build.sh (§10.1)
+docs/                           user documentation (FIRMWARE.md: installing the firmware)
 scripts/check_all.sh            runs every verification level
 .github/workflows/              CI: tests, image build to GHCR
 ```
@@ -122,10 +126,12 @@ spool/<id>.bin             file bytes of a share still being processed
   attempt counts), auto-delivery skips, one-time migration flags.
 - `pending_requests` + `spool/`: the spool (§7.1, §14).
 - `issued_titles(key, title, issued_at)`: titles of items downloaded through the
-  catalog or OPDS (saved on the X3 as `<title>.<ext>`), kept 365 days so a later item
-  never gets the same file name. A one-time migration at store open fills it from items
-  downloaded before the table existed (flag in `kv`; retried at the next start if it
-  fails).
+  catalog or OPDS (saved on the X3 as `<title>.<ext>`) and the names LAN push saved
+  (including a numbered `<title> (n)`). They are kept for good, so a later item never
+  gets a file name that may still be on the card: with `download.open` the Send to X3
+  firmware opens whatever file already has the row's name. Two one-time migrations at
+  store open fill it from items delivered before the table and before LAN push names
+  were reserved (flags in `kv`; retried at the next start if they fail).
 - Folders are created 0700 and files 0600 whatever the umask (the database holds the
   tokens); stale `*.tmp` files older than an hour in `spool/` and `deliveries/` are
   removed at store open.
@@ -344,12 +350,28 @@ flight by wall-clock time (`created_at` ≥ start of this run).
 
 ### 7.2 Device API for CrossPoint 2.x plugin (`Authorization: Bearer <device_token>`)
 
-- `GET /device/v1/catalog?page=P&limit=L` → `{"items":[{"id","title","subtitle"}]}`.
+- `GET /device/v1/catalog?page=P&limit=L&offset=O` → `{"items":[{"id","title","subtitle"}]}`.
   `limit` is clamped to 2..17. The list is one **fetch row** followed by every item,
-  newest first; a page returns up to `L` rows of it starting at offset `(P-1)*(L-1)`
-  (firmware sends `limit=page_size+1`, shows `page_size`, uses the extra row to detect
-  a next page), so the fetch row is the first row of page 1 only. Item `subtitle` =
+  newest first; a page returns up to `L` rows of it from a start row, so the fetch row
+  is the first row of page 1 only. Item `subtitle` =
   `"<New|Read on X3 date> · <words> words|extraction failed · <host|site|note|email|PDF>"`.
+  **Paging styles.** The browse template is
+  `?page={page}&limit={limit}&offset={offset}` (§10), and `page_size` is
+  `delivery.PAGE_SIZE` = 8. What the firmware sends, and the start row
+  (`delivery.catalog_page`; capped at 2^31):
+
+  | Firmware | Sends | Next Page when | Start row |
+  |---|---|---|---|
+  | 2.0.0rc, develop `3f387a9` | `limit=page_size+1`, `offset` as the literal text `{offset}` (it substitutes only the variables it knows; aiohttp reads it back as `{offset}`) | the extra (lookahead) row came back | `(P-1)*(L-1)` |
+  | develop `c3b16da` (2026-10-27) and later, the Send to X3 firmware | `{offset}` selects offset paging: `limit=page_size+1`, `offset=(P-1)*page_size` | the lookahead row came back | `O` |
+  | the same, with a 0.2.0 plugin (`?page={page}&limit={limit}`, no `{offset}`) | "sized pages": `limit=page_size`, no lookahead row | a page came back full | `(P-1)*L`, chosen because `L == PAGE_SIZE` (older firmware always sends `page_size+1`) |
+
+  `offset` counts only when it is ASCII digits; anything else (the literal text, a
+  sign) falls back to the page. With a 0.2.0 plugin on new firmware every row is still
+  listed once, but when the rows fill whole pages a last page holds only **Previous
+  Page**; reinstalling the plugin removes it. (Before 0.3.0 the server always used
+  `(P-1)*(L-1)`, so on new firmware every later page repeated the last row of the page
+  before.) `tests/test_web_device.py` models all three for 0, 7, 8, 9, 15 and 20 items.
 - **The fetch row** is how the X3 gets new reading by default (nothing is downloaded by
   itself):
   - Something new (items with no delivery on any channel, except items flagged
@@ -644,7 +666,8 @@ The firmware queues `book.downloaded` (vars `path`, `title`, `plugin`) after eve
 catalog download that landed on the card (`PluginCatalogActivity::emitBookDownloaded`).
 Without `"connect": true` no Wi-Fi is started for it (only `sleep.enter` implies that),
 so the report goes out at the next Wi-Fi join (`WifiSelectionActivity` drains the
-outboxes on every connect). Opening the plugin joins Wi-Fi only when Wi-Fi is off:
+outboxes on every connect), or, on the Send to X3 firmware, right before the book
+opens (§10.1). Opening the plugin joins Wi-Fi only when Wi-Fi is off:
 leaving a catalog restarts the X3, so the next open from Home joins, and reports,
 before the list loads; re-opening it from the plugin list keeps the connection and
 reports nothing. A drain delivers at most 4 lines across all event plugins, in folder
@@ -667,7 +690,7 @@ of the reports, and each such line counts against it even with no handler left.
   "description": "Articles and notes you shared",
   "browse": {
     "format": "json",
-    "url": "http://<host>:8765/device/v1/catalog?page={page}&limit={limit}",
+    "url": "http://<host>:8765/device/v1/catalog?page={page}&limit={limit}&offset={offset}",
     "headers": {"Authorization": "Bearer <device_token>"},
     "items": "items",
     "fields": {"title": "title", "author": "subtitle", "id": "id"},
@@ -677,7 +700,8 @@ of the reports, and each such line counts against it even with no handler left.
     "url": "http://<host>:8765/device/v1/items/{id}.epub",
     "headers": {"Authorization": "Bearer <device_token>"},
     "dest_dir": "/Inbox",
-    "filename": "{title}.epub"
+    "filename": "{title}.epub",
+    "open": true
   },
   "events": {
     "sleep.enter": {
@@ -691,6 +715,9 @@ of the reports, and each such line counts against it even with no handler left.
   }
 }
 ```
+
+`browse.url` carries `{offset}` for the paging styles in §7.2; `download.open` is
+always written and only read by the Send to X3 firmware (§10.1).
 
 Options: `auto_delivery` (bool, default **false**) selects the `events` block:
 `book.downloaded` (the report of saved files, with `?confirm=1` on the download URL)
@@ -718,10 +745,59 @@ WiFi settings from file before sleep mode"). The text is
 the docs say the same. The catalog works on every 2.x build.
 
 **Install over the LAN** (`install_to_device`): with the X3 in File Transfer, read
-`/api/status` (refused for firmware below 2 without `pluginApi`), create the inbox
-folder, write the three files (atomic `/api/plugin-fs` when Plugins is on, else
-delete + upload), and report whether Plugins is switched off. It returns log lines; a
-line starting with `Error:` means the install did not complete.
+`/api/status` (refused for firmware below 2 without `pluginApi`), say what Confirm
+does on this X3 (`confirm_behaviour`: "Confirm opens the book: ..." when
+`pluginCapabilities` lists `catalog.open_after_download`, else "Confirm downloads;
+install the Send to X3 firmware to open books directly (docs/FIRMWARE.md)."), create
+the inbox folder, write the three files (atomic `/api/plugin-fs` when Plugins is on,
+else delete + upload), and report whether Plugins is switched off. It returns log
+lines; a line starting with `Error:` means the install did not complete.
+
+### 10.1 The Send to X3 firmware (`firmware/`, `download.open`)
+
+Stock CrossPoint cannot open a book from a plugin catalog: after a download it shows
+**Download complete** (develop `PluginCatalogActivity.cpp`, `downloadFinished`). The
+Send to X3 firmware is upstream develop at the commit in `firmware/UPSTREAM`
+(`8f4d035`, 2026-10-28) plus `firmware/patches/`, built by `firmware/build.sh` in
+Docker as `crosspoint-2.0.0-sx3+<hash>-x3-x4.bin` (version `2.0.0-sx3+<hash>`, so the
+built-in updater does not offer official 2.0.0 over it). Users install it with
+**Settings > System > SD Card Firmware Update** (docs/FIRMWARE.md); developer notes
+are in `firmware/README.md`.
+
+The patch adds an opt-in manifest key, `download.open` (bool, default false), and
+advertises `catalog.open_after_download` in `/api/status` `pluginCapabilities` and
+`{plugin_capabilities}`. With it, Confirm on a single-file row whose destination the
+reader opens (`.epub`, `.txt`, `.md`, `.xtc`):
+
+- **already on the card** (the sanitized `dest_dir/filename`; an `.epub` must start
+  with a ZIP signature): saves `APP_STATE.openEpubPath` and reboots into it as is,
+  with no request, no `book.downloaded`, no drain (it queued nothing; the next Wi-Fi
+  join sends anything else) and its layout cache and reading position kept. If the
+  state cannot be saved it shows **Cannot open file** instead;
+- **otherwise**: downloads it as usual (`?confirm=1`, cache reset, `book.downloaded`
+  queued), shows the Loading popup and drains the plugin event outboxes while Wi-Fi
+  is still up (so `POST /device/v1/fetched` reaches the app before the reboot; at
+  most 4 lines, as any drain; skipped below the TLS heap floor, and the report then
+  waits for the next Wi-Fi join as on stock), saves `APP_STATE.openEpubPath` and
+  calls `silentRestartToReader()`, the clean-heap reboot every Wi-Fi screen does on
+  exit, into the reader. If the state cannot be saved it keeps the stock Download complete
+  screen. A failed or cancelled download opens nothing.
+
+The Confirm label reads **Open** instead of **Fetch** on the rows that open (every
+Send to X3 row is a single `.epub` or `.txt`). Bundle rows and other file types keep
+the stock flow and the Fetch label; other plugins are unaffected unless they set the
+key. Stock firmware never reads `download.open`, so the app always writes it.
+
+What this means for the app: the destination file name is the book's identity, which
+§7.2 already guarantees (a "Get N new" title is never reused, item titles are unique
+and kept in `issued_titles`), so **Open** on a new "Get N new" row always downloads,
+and **Open** on an item already downloaded from its own row reopens the copy on the
+card without marking anything. An item that arrived inside a "Get N new" book is not
+at its own row's destination (`<item title>.<fmt>`), so its row downloads a separate
+copy, marked `catalog`, which starts at page 1; that book is reopened from the
+Library or recent books. "Nothing new right now" (`none`) is a 404 and never becomes
+a file, so it shows **Download failed** on every firmware. Confirmation is immediate
+instead of at the next Wi-Fi join, so the grace period of §7.2 rarely applies.
 
 **Server address** (`resolve_base_url`): `server_host` (host, `host:port` or a full
 URL) wins; else the Supervisor's `/network/info` (primary interface's IPv4) with the
@@ -801,15 +877,20 @@ moments.
    a temp `/data`; fixture HTTP server for article fetches; GreenMail (docker) IMAP;
    fake HA websocket; fake CrossPoint File Transfer server.
 3. **Firmware e2e** (`e2e/`): the real CrossPoint firmware compiled with
-   `crosspoint-simulator` for the X3 (`2.0.0rc` and `1.6.5`), headless, with an SD
+   `crosspoint-simulator` for the X3 (`2.0.0rc` and `1.6.5`; develop `3f387a9` and
+   `8f4d035`, and the Send to X3 firmware), headless, with an SD
    folder produced by our bundle generator, driving real catalog browse/download,
-   sleep-entry auto-delivery, OPDS browse/download, File Transfer push, and opening
-   the delivered files in the real reader with screenshots. Plus a wire harness that
+   sleep-entry auto-delivery, OPDS browse/download, File Transfer push, opening
+   the delivered files in the real reader with screenshots, and (Send to X3 firmware)
+   Confirm opening the book through a real restart. Plus a wire harness that
    compiles the device's own HTTP client to check exact framing against our server.
 4. **Packaging**: build the arm64 image, run it with an `options.json`, validate
    `config.yaml` with the Supervisor's schema, and run the app inside the HA
    devcontainer Supervisor.
 5. **Validation**: `epubcheck` on every generated EPUB fixture.
+6. **The Send to X3 firmware** (`firmware/build.sh`): CrossPoint's host tests for the
+   catalog code the patch touches (`PluginCatalogOpenTest` and upstream's paging,
+   manifest and picker suites), then the X3 build.
 
 How to run each level, and the latest results, are in [TESTING.md](TESTING.md).
 
@@ -914,7 +995,9 @@ def matches_title(text: str, title: str, *, url: str = "", site: str = "") -> bo
 
 # delivery.py
 def build_auto_delivery(store: Store, ev: str, ts: str) -> bytes | None   # None -> 404
-def catalog_page(store: Store, page: int, limit: int, *, fmt: str = "epub") -> dict  # {"items":[...]}
+PAGE_SIZE = 8                               # browse.page_size in device.json
+def catalog_page(store: Store, page: int, limit: int, *, offset: int | None = None,
+                 fmt: str = "epub") -> dict  # {"items":[...]}; start row as in §7.2
 def build_fetch_bundle(store: Store, fmt: str = "epub") -> FetchBundle | None  # None: nothing new
 def fetch_lookup(store: Store, bundle_id: str, fmt: str = "epub") -> FetchBundle | None  # marks nothing
 def fetch_sent(store: Store, bundle: FetchBundle, *, confirm: bool = False, channel: str = "fetch") -> None
@@ -932,6 +1015,8 @@ async def install_to_device(device_host: str, *, base_url: str, device_token: st
 async def resolve_base_url(opts: Options, ...) -> tuple[str, str]   # (url, "options"|"supervisor"|"local address"|"invalid server_host"|"")
 def normalize_base_url(base_url: str) -> str                         # raises ValueError
 def device_token_problem(token: str) -> str                          # "" when usable
+def opens_books(status: dict | None) -> bool                         # pluginCapabilities has catalog.open_after_download
+def confirm_behaviour(status: dict | None) -> str                    # the install log line about Confirm
 def under_supervisor() -> bool
 def looks_container_internal(base_url: str) -> bool                  # 172.16.0.0/12
 

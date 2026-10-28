@@ -10,8 +10,9 @@ import zipfile
 import pytest
 from aiohttp import web
 
-from sendtox3 import __version__, plugin_bundle
+from sendtox3 import __version__, delivery, plugin_bundle
 from sendtox3.plugin_bundle import (
+    OPEN_CAPABILITY,
     PLUGIN_DIR,
     PLUGIN_NAME,
     build_bundle_zip,
@@ -20,6 +21,7 @@ from sendtox3.plugin_bundle import (
     install_to_device,
     looks_container_internal,
     normalize_base_url,
+    opens_books,
     resolve_base_url,
 )
 
@@ -30,13 +32,15 @@ TOKEN = "device-test-token"
 def test_device_json_matches_spec_exactly(opts):
     """§10. By default (auto_delivery off) the only event is ``book.downloaded``, which
     reports saved files and never joins Wi-Fi by itself (no ``connect``); downloads carry
-    ``?confirm=1``. With auto_delivery the event is ``sleep.enter`` and there is no confirm."""
+    ``?confirm=1``. With auto_delivery the event is ``sleep.enter`` and there is no confirm.
+    Always: ``{offset}`` in the browse URL (offset paging on develop 8f4d035+) and
+    ``download.open`` (Confirm opens the book on the Send to X3 firmware)."""
     assert build_device_json(base_url=BASE, device_token=TOKEN, opts=opts) == {
         "title": "Send to X3",
         "description": "Articles and notes you shared",
         "browse": {
             "format": "json",
-            "url": "http://192.168.1.50:8765/device/v1/catalog?page={page}&limit={limit}",
+            "url": "http://192.168.1.50:8765/device/v1/catalog?page={page}&limit={limit}&offset={offset}",
             "headers": {"Authorization": "Bearer device-test-token"},
             "items": "items",
             "fields": {"title": "title", "author": "subtitle", "id": "id"},
@@ -47,6 +51,7 @@ def test_device_json_matches_spec_exactly(opts):
             "headers": {"Authorization": "Bearer device-test-token"},
             "dest_dir": "/Inbox",
             "filename": "{title}.epub",
+            "open": True,
         },
         "events": {
             "book.downloaded": {
@@ -66,7 +71,7 @@ def test_device_json_matches_spec_exactly(opts):
         "description": "Articles and notes you shared",
         "browse": {
             "format": "json",
-            "url": "http://192.168.1.50:8765/device/v1/catalog?page={page}&limit={limit}",
+            "url": "http://192.168.1.50:8765/device/v1/catalog?page={page}&limit={limit}&offset={offset}",
             "headers": {"Authorization": "Bearer device-test-token"},
             "items": "items",
             "fields": {"title": "title", "author": "subtitle", "id": "id"},
@@ -77,6 +82,7 @@ def test_device_json_matches_spec_exactly(opts):
             "headers": {"Authorization": "Bearer device-test-token"},
             "dest_dir": "/Inbox",
             "filename": "{title}.epub",
+            "open": True,
         },
         "events": {
             "sleep.enter": {
@@ -89,6 +95,18 @@ def test_device_json_matches_spec_exactly(opts):
             }
         },
     }
+
+
+@pytest.mark.parametrize("auto", [False, True])
+@pytest.mark.parametrize("fmt", ["epub", "txt"])
+def test_open_and_paging_in_every_plugin(opts, auto, fmt):
+    """``download.open`` for every option set (the reader opens .epub and .txt), and the
+    page size the app pages by (``delivery.PAGE_SIZE``)."""
+    opts.auto_delivery, opts.delivery_format = auto, fmt
+    dj = build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)
+    assert dj["download"]["open"] is True
+    assert dj["browse"]["page_size"] == delivery.PAGE_SIZE == 8
+    assert dj["browse"]["url"].endswith("/device/v1/catalog?page={page}&limit={limit}&offset={offset}")
 
 
 def test_auto_delivery_off_has_no_sleep_event(opts):
@@ -125,7 +143,7 @@ def test_strict_json_and_size(opts):
     assert json.loads(text) == build_device_json(base_url=BASE, device_token=TOKEN, opts=opts)
     assert "//" not in text.replace("http://", "") and "/*" not in text  # no comments
     placeholders = set(re.findall(r"\{[a-z.]+\}", text))
-    assert placeholders == {"{page}", "{limit}", "{id}", "{title}", "{event.id}", "{event.ts}"}
+    assert placeholders == {"{page}", "{limit}", "{offset}", "{id}", "{title}", "{event.id}", "{event.ts}"}
     long_base = "http://" + "h" * 200 + ".example:8765"
     assert len(device_json_bytes(base_url=long_base, device_token="t" * 64, opts=opts)) <= 8192
 
@@ -181,6 +199,39 @@ def test_bundle_zip_layout(opts):
     assert len(PLUGIN_NAME.encode()) <= 23 and PLUGIN_DIR == "/.crosspoint/plugins/sendtox3"
 
 
+@pytest.mark.parametrize("auto", [False, True])
+def test_readme_explains_both_confirm_behaviours(opts, auto):
+    opts.auto_delivery = auto
+    text = " ".join(plugin_bundle.readme_bytes(base_url=BASE, opts=opts).decode().split())
+    assert 'On the Send to X3 firmware (CrossPoint plus one change, see docs/FIRMWARE.md' in text
+    assert 'it reads "Open" and opens the book right away' in text
+    assert 'On other CrossPoint builds Confirm saves the book and shows "Download complete"' in text
+    # Only the row that saved a book reopens it: a "Get N new" book is saved under the
+    # bundle's name, so its items' own rows download separate copies.
+    assert "already on the card" not in text
+    assert "Open on a row that saved its book before opens that copy where you left off" in text
+    assert ('Reopen a "Get N new" book from Home or the Library: Open on one of its items\' own rows '
+            "downloads a separate copy that starts at page 1") in text
+    # Nothing opens by itself, also not a delivery at sleep.
+    assert ("It waits in the Library: only Confirm opens a book." in text) is auto
+
+
+@pytest.mark.parametrize("caps,opens", [
+    ("catalog.lists,catalog.item_details,catalog.encoded_item_fields,catalog.open_after_download", True),
+    ("catalog.open_after_download", True),
+    ("catalog.lists, catalog.open_after_download ", True),
+    (["catalog.lists", "catalog.open_after_download"], True),
+    ("catalog.lists,catalog.notices,catalog.bundle_install,catalog.version_tracking,catalog.compatibility,"
+     "catalog.item_details", False),  # 2.0.0rc
+    ("catalog.open_after_download_v2", False),
+    ("", False), (None, False), (7, False),
+])
+def test_opens_books_reads_plugin_capabilities(caps, opens):
+    assert OPEN_CAPABILITY == "catalog.open_after_download"
+    assert opens_books({"version": "2.0.0", "pluginApi": 1, "pluginCapabilities": caps}) is opens
+    assert opens_books({"version": "1.6.5"}) is False and opens_books(None) is False
+
+
 # ----------------------------------------------------------------------- install
 
 
@@ -189,8 +240,9 @@ class FakeDevice:
     returns a bool, write_plugin_file() returns the transport or raises."""
 
     def __init__(self, *, version="2.0.0-rc+abc", plugins_on=True, write_error=None, reachable=True,
-                 mkdir_ok=True, status_raises=False):
+                 mkdir_ok=True, status_raises=False, caps=None):
         self.version = version
+        self.caps = caps
         self.plugins_on = plugins_on
         self.write_error = write_error
         self.reachable = reachable
@@ -210,6 +262,8 @@ class FakeDevice:
         st = {"version": self.version, "device": "X3", "ip": "192.168.1.60"}
         if self.version.startswith("2"):
             st["pluginApi"] = 1
+        if self.caps is not None:
+            st["pluginCapabilities"] = self.caps
         return st
 
     async def mkdir(self, parent, name):
@@ -245,6 +299,31 @@ async def test_install_happy_path(opts):
     assert set(dev.files) == {f"{PLUGIN_DIR}/device.json", f"{PLUGIN_DIR}/manifest.json", f"{PLUGIN_DIR}/README.md"}
     assert "/Inbox" in dev.dirs and dev.closed
     assert not any(c.startswith("settings") for c in dev.calls)  # never changes device settings
+
+
+STOCK_CAPS = "catalog.lists,catalog.notices,catalog.item_details,catalog.encoded_item_fields"
+
+
+@pytest.mark.parametrize("version,caps,line", [
+    ("2.0.0-sx3+4051899", STOCK_CAPS + ",catalog.open_after_download",
+     "Confirm opens the book: this X3's firmware opens catalog downloads in the reader."),
+    ("2.0.0", STOCK_CAPS,
+     "Confirm downloads; install the Send to X3 firmware to open books directly (docs/FIRMWARE.md)."),
+    ("2.0.0-rc+abc", None,
+     "Confirm downloads; install the Send to X3 firmware to open books directly (docs/FIRMWARE.md)."),
+])
+async def test_install_says_what_confirm_does(opts, version, caps, line):
+    dev = FakeDevice(version=version, caps=caps)
+    lines = await install_to_device("x3", base_url=BASE, device_token=TOKEN, opts=opts, client=dev)
+    assert lines[1] == f"Found X3 running CrossPoint {version}." and lines[2] == line, lines
+    assert lines[-1].startswith("Done: the plugin is installed") and lines.count(line) == 1
+    assert json.loads(dev.files[f"{PLUGIN_DIR}/device.json"])["download"]["open"] is True  # the same plugin
+
+
+async def test_install_refused_firmware_says_nothing_about_confirm(opts):
+    lines = await install_to_device("x3", base_url=BASE, device_token=TOKEN, opts=opts,
+                                    client=FakeDevice(version="1.6.5"))
+    assert not any("Confirm" in l for l in lines), lines
 
 
 async def test_install_with_plugins_off_tells_the_user(opts):
@@ -292,7 +371,7 @@ async def test_install_input_errors(opts):
 # (403 when Plugins is off), /upload (never overwrites), /delete.
 
 
-def _fake_crosspoint(sd: dict, *, plugins_on: bool):
+def _fake_crosspoint(sd: dict, *, plugins_on: bool, caps: str = STOCK_CAPS):
     import posixpath
 
     dirs = sd.setdefault("dirs", {"/", "/.crosspoint"})
@@ -302,7 +381,8 @@ def _fake_crosspoint(sd: dict, *, plugins_on: bool):
         return posixpath.normpath("/" + (p or "/").strip("/")).replace("//", "/")
 
     async def status(request):
-        return web.json_response({"version": "2.0.0-rc+3f387a9", "device": "X3", "pluginApi": 1, "mode": "STA"})
+        return web.json_response({"version": "2.0.0-rc+3f387a9", "device": "X3", "pluginApi": 1, "mode": "STA",
+                                  "pluginCapabilities": caps})
 
     async def mkdir(request):
         form = await request.post()
@@ -380,7 +460,9 @@ def _fake_crosspoint(sd: dict, *, plugins_on: bool):
 async def test_install_with_real_device_client(aiohttp_server, opts, plugins_on):
     pytest.importorskip("sendtox3.device_client")
     sd: dict = {}
-    server = await aiohttp_server(_fake_crosspoint(sd, plugins_on=plugins_on))
+    # The Send to X3 firmware (with Plugins on here) and a stock build (off).
+    caps = STOCK_CAPS + ("," + OPEN_CAPABILITY if plugins_on else "")
+    server = await aiohttp_server(_fake_crosspoint(sd, plugins_on=plugins_on, caps=caps))
     host = f"127.0.0.1:{server.port}"
     # A 0.1.0 plugin's queue of sleep.enter lines: it must go, or it would hold back the
     # download reports (4 events per Wi-Fi join).
@@ -390,6 +472,7 @@ async def test_install_with_real_device_client(aiohttp_server, opts, plugins_on)
         lines = await install_to_device(host, base_url=BASE, device_token=TOKEN, opts=opts)
         assert lines[-1].startswith("Done"), lines
         assert ("Plugins is off" in lines[-1]) == (not plugins_on)
+        assert lines[2].startswith("Confirm opens the book" if plugins_on else "Confirm downloads;"), lines
         dj = json.loads(sd["files"][f"{PLUGIN_DIR}/device.json"])
         assert ("sleep.enter" in dj["events"]) == (attempt == 0)
     assert sorted(k for k in sd["files"]) == sorted(f"{PLUGIN_DIR}/{n}" for n in ("README.md", "device.json",

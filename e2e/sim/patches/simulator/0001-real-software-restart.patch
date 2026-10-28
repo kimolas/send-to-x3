@@ -1,0 +1,241 @@
+Subject: [PATCH] Emulate ESP.restart() as a real relaunch (opt-in)
+
+crosspoint-simulator 5b38077 makes ESP.restart()/esp_restart() a no-op and
+RTC_NOINIT_ATTR plain globals, so the firmware's silent restart (a reboot that
+keeps a few RTC variables, e.g. "reopen the reader") continues in the same
+process. With CROSSPOINT_SIM_RESTART=exec the simulator instead:
+
+- keeps RTC_NOINIT_ATTR variables in their own section (__DATA,__rtc_noinit on
+  macOS, rtc_noinit elsewhere), saves it to $TMPDIR and restores it in main()
+  before setup(), like the ESP32's RTC memory across a software reset;
+- swaps in CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART and
+  CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART (the pre-restart schedule is never
+  replayed, as after a deep-sleep wake) and drops the *_AFTER_WAKE schedules;
+- prints "[SIM] software restart: relaunching (rtc N bytes)" and execvp()s
+  itself (same pid and stdout), then "[SIM] software restart: boot N,
+  restored X/Y rtc bytes" in the new process;
+- marks the listening sockets close-on-exec so a relaunch can bind them again.
+
+Without the variable ESP.restart() stays a no-op (upstream behaviour).
+Used by send-to-x3 e2e/sim/build_sim.sh (--sim-patch; the "fork" build).
+
+diff --git a/src/Arduino.h b/src/Arduino.h
+index ec5e2e8..5105f21 100644
+--- a/src/Arduino.h
++++ b/src/Arduino.h
+@@ -16,7 +16,13 @@
+ #define ICACHE_RODATA_ATTR
+ #define IRAM_ATTR
+ #define DRAM_ATTR
+-#define RTC_NOINIT_ATTR
++// RTC_NOINIT variables live in their own section so an emulated software reset
++// (CROSSPOINT_SIM_RESTART=exec) can carry them into the relaunched process.
++#if defined(__APPLE__)
++#define RTC_NOINIT_ATTR __attribute__((section("__DATA,__rtc_noinit"), used))
++#else
++#define RTC_NOINIT_ATTR __attribute__((section("rtc_noinit"), used))
++#endif
+ #define SET_LOOP_TASK_STACK_SIZE(bytes)
+ #define PGM_P const char *
+ #define PSTR(s) (s)
+@@ -47,6 +53,8 @@ inline int digitalRead(int /*pin*/) { return 1; }
+ #include "Print.h"
+ #include "WString.h"
+ 
++namespace SimulatorLifecycle { void softwareRestart(); }
++
+ struct ESPMock {
+   static constexpr uint32_t HEAP_SIZE = 1024 * 1024;
+ 
+@@ -64,7 +72,7 @@ struct ESPMock {
+   }
+ 
+   uint32_t getFreeHeap() { return heapValue("CROSSPOINT_SIM_FREE_HEAP"); }
+-  void restart() {}
++  void restart() { SimulatorLifecycle::softwareRestart(); }  // no-op unless CROSSPOINT_SIM_RESTART=exec
+   uint32_t getHeapSize() { return HEAP_SIZE; }
+   uint32_t getMinFreeHeap() { return getFreeHeap(); }
+   uint32_t getMaxAllocHeap() {
+diff --git a/src/CrossPointWebServer.cpp b/src/CrossPointWebServer.cpp
+index 6b8bf4c..b1dc469 100644
+--- a/src/CrossPointWebServer.cpp
++++ b/src/CrossPointWebServer.cpp
+@@ -1013,6 +1013,9 @@ void CrossPointWebServer::begin() {
+     LOG_ERR("WEB", "[SIM] socket failed: %s", strerror(errno));
+     return;
+   }
++  // Close on exec: an emulated software restart (CROSSPOINT_SIM_RESTART=exec)
++  // must not carry the listening socket into the relaunched process.
++  fcntl(state->fd, F_SETFD, FD_CLOEXEC);
+ 
+   int yes = 1;
+   setsockopt(state->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+diff --git a/src/SimulatorLifecycle.cpp b/src/SimulatorLifecycle.cpp
+index f3ab960..317e7b0 100644
+--- a/src/SimulatorLifecycle.cpp
++++ b/src/SimulatorLifecycle.cpp
+@@ -5,6 +5,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <unistd.h>
++#include <string>
+ 
+ namespace {
+ 
+@@ -17,6 +18,30 @@ constexpr const char *kScreenshotsAfterWakeEnv =
+     "CROSSPOINT_SIM_SCREENSHOTS_AFTER_WAKE";
+ char **gArgv = nullptr;
+ 
++#if defined(__APPLE__)
++extern char rtcSectionStart __asm("section$start$__DATA$__rtc_noinit");
++extern char rtcSectionEnd __asm("section$end$__DATA$__rtc_noinit");
++#else
++extern char __start_rtc_noinit[] __attribute__((weak));
++extern char __stop_rtc_noinit[] __attribute__((weak));
++#endif
++
++void rtcBounds(char *&begin, size_t &size) {
++#if defined(__APPLE__)
++  begin = &rtcSectionStart;
++  size = static_cast<size_t>(&rtcSectionEnd - &rtcSectionStart);
++#else
++  begin = __start_rtc_noinit;
++  size = __start_rtc_noinit ? static_cast<size_t>(__stop_rtc_noinit - __start_rtc_noinit) : 0;
++#endif
++}
++
++constexpr const char *kRestartEnv = "CROSSPOINT_SIM_RESTART";
++constexpr const char *kRtcImageEnv = "CROSSPOINT_SIM_RTC_IMAGE";
++constexpr const char *kBootCountEnv = "CROSSPOINT_SIM_BOOT";
++constexpr const char *kInputScriptAfterRestartEnv = "CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART";
++constexpr const char *kScreenshotsAfterRestartEnv = "CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART";
++
+ void promoteAfterWakeValue(const char *target, const char *afterWake) {
+   const char *value = std::getenv(afterWake);
+   if (value) {
+@@ -69,4 +94,49 @@ WakeReason consumeWakeReason() {
+   _exit(1);
+ }
+ 
++void softwareRestart() {
++  const char *mode = std::getenv(kRestartEnv);
++  if (!mode || std::strcmp(mode, "exec") != 0 || !gArgv || !gArgv[0]) {
++    return;  // upstream behaviour: ESP.restart() is a no-op
++  }
++  char *begin = nullptr;
++  size_t size = 0;
++  rtcBounds(begin, size);
++  const char *dir = std::getenv("TMPDIR");
++  std::string path = std::string(dir && *dir ? dir : "/tmp") + "/crosspoint-sim-rtc-" + std::to_string(getpid()) + ".bin";
++  if (FILE *f = std::fopen(path.c_str(), "wb")) {
++    if (size) std::fwrite(begin, 1, size, f);
++    std::fclose(f);
++    setenv(kRtcImageEnv, path.c_str(), 1);
++  }
++  const char *boot = std::getenv(kBootCountEnv);
++  setenv(kBootCountEnv, std::to_string((boot ? std::atoi(boot) : 0) + 1).c_str(), 1);
++  // Like a deep-sleep wake, never replay the pre-restart schedule.
++  promoteAfterWakeValue(kInputScriptEnv, kInputScriptAfterRestartEnv);
++  promoteAfterWakeValue(kScreenshotsEnv, kScreenshotsAfterRestartEnv);
++  unsetenv(kInputScriptAfterWakeEnv);
++  unsetenv(kScreenshotsAfterWakeEnv);
++  std::fprintf(stderr, "[SIM] software restart: relaunching (rtc %zu bytes)\n", size);
++  std::fflush(nullptr);
++  execvp(gArgv[0], gArgv);
++  std::perror("execvp");
++  _exit(1);
++}
++
++void restoreRtcImage() {
++  const char *path = std::getenv(kRtcImageEnv);
++  if (!path) return;
++  char *begin = nullptr;
++  size_t size = 0;
++  rtcBounds(begin, size);
++  if (FILE *f = std::fopen(path, "rb")) {
++    const size_t got = size ? std::fread(begin, 1, size, f) : 0;
++    std::fclose(f);
++    std::fprintf(stderr, "[SIM] software restart: boot %s, restored %zu/%zu rtc bytes\n",
++                 std::getenv(kBootCountEnv) ? std::getenv(kBootCountEnv) : "?", got, size);
++  }
++  std::remove(path);
++  unsetenv(kRtcImageEnv);
++}
++
+ } // namespace SimulatorLifecycle
+diff --git a/src/SimulatorLifecycle.h b/src/SimulatorLifecycle.h
+index 5ab7350..f9fcf05 100644
+--- a/src/SimulatorLifecycle.h
++++ b/src/SimulatorLifecycle.h
+@@ -7,5 +7,11 @@ enum class WakeReason { None, PowerButton };
+ void initProcessArgs(char** argv);
+ WakeReason consumeWakeReason();
+ [[noreturn]] void rebootAsPowerWake();
++// ESP.restart()/esp_restart(): with CROSSPOINT_SIM_RESTART=exec, saves the
++// RTC_NOINIT section and relaunches the process (same pid, same stdout);
++// otherwise returns (upstream no-op).
++void softwareRestart();
++// Called by main() before setup(): restores a saved RTC_NOINIT image.
++void restoreRtcImage();
+ 
+ }  // namespace SimulatorLifecycle
+diff --git a/src/WebServer.cpp b/src/WebServer.cpp
+index 4c17919..df58822 100644
+--- a/src/WebServer.cpp
++++ b/src/WebServer.cpp
+@@ -519,6 +519,9 @@ void WebServer::begin() {
+     LOG_ERR("WEB", "[SIM] WebServer socket failed: %s", strerror(errno));
+     return;
+   }
++  // Close on exec: an emulated software restart (CROSSPOINT_SIM_RESTART=exec)
++  // must not carry the listening socket into the relaunched process.
++  fcntl(impl_->fd, F_SETFD, FD_CLOEXEC);
+ 
+   int yes = 1;
+   setsockopt(impl_->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+diff --git a/src/WebSocketsServer.cpp b/src/WebSocketsServer.cpp
+index 39e79d6..437ddff 100644
+--- a/src/WebSocketsServer.cpp
++++ b/src/WebSocketsServer.cpp
+@@ -3,6 +3,7 @@
+ #include "SimulatorNetworkPorts.h"
+ #include <Logging.h>
+ #include <arpa/inet.h>
++#include <fcntl.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <sys/time.h>
+@@ -340,6 +341,9 @@ void WebSocketsServer::begin() {
+     LOG_ERR("WS", "[SIM] WebSocket socket failed: %s", strerror(errno));
+     return;
+   }
++  // Close on exec: an emulated software restart (CROSSPOINT_SIM_RESTART=exec)
++  // must not carry the listening socket into the relaunched process.
++  fcntl(impl_->fd, F_SETFD, FD_CLOEXEC);
+ 
+   int yes = 1;
+   setsockopt(impl_->fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+diff --git a/src/esp_system.h b/src/esp_system.h
+index ef51471..651ef4e 100644
+--- a/src/esp_system.h
++++ b/src/esp_system.h
+@@ -1,4 +1,5 @@
+ #pragma once
+ #include <cstdint>
+-inline void esp_restart() {}
++namespace SimulatorLifecycle { void softwareRestart(); }
++inline void esp_restart() { SimulatorLifecycle::softwareRestart(); }
+ inline uint32_t esp_get_free_heap_size() { return 1000000; }
+\ No newline at end of file
+diff --git a/src/simulator_main.cpp b/src/simulator_main.cpp
+index 21edd8a..dfcecc0 100644
+--- a/src/simulator_main.cpp
++++ b/src/simulator_main.cpp
+@@ -13,6 +13,7 @@ extern HalDisplay display; // defined in main.cpp
+ 
+ int main(int argc, char **argv) {
+   SimulatorLifecycle::initProcessArgs(argv);
++  SimulatorLifecycle::restoreRtcImage();
+   setup();
+   while (!display.shouldQuit()) {
+     // Clear input edge latches once per frame. update() may be called many

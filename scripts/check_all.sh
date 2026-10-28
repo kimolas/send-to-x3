@@ -3,7 +3,7 @@
 #   1. unit + integration tests                (always)
 #   2. docker tests: image build/smoke, epubcheck, GreenMail IMAP, Android import  (--docker)
 #   3. firmware host harnesses: CrossPoint's EPUB/TXT/OPDS/filename code         (--firmware)
-#   4. firmware simulator e2e (S1-S5, W1) against the real app, local + docker    (--e2e)
+#   4. firmware simulator e2e (S1-S6, W1) against the real app, local + docker    (--e2e)
 #   5. Home Assistant Supervisor schema validation                               (--supervisor)
 # --all = everything. Work files go to $SENDTOX3_E2E_WORK (default ~/.cache/sendtox3-e2e),
 # which must not contain spaces and should not be inside a synced folder.
@@ -34,11 +34,13 @@ stage "1. unit + integration tests"
 "$PY" -m pytest -q -p no:cacheprovider
 
 if [ "$FIRMWARE" = 1 ] || [ "$E2E" = 1 ]; then
-  stage "building CrossPoint simulators / firmware checkouts (2.0.0rc, 1.6.5, develop 3f387a9)"
+  stage "building CrossPoint simulators / firmware checkouts (2.0.0rc, 1.6.5, 3f387a9, develop, fork)"
   e2e/sim/build_sim.sh 2.0.0rc
   e2e/sim/build_sim.sh 1.6.5
   e2e/sim/build_sim.sh 3f387a9
-  e2e/wire/build_wire.sh 2.0.0rc
+  e2e/sim/build_sim.sh develop
+  e2e/sim/build_sim.sh fork
+  for ref in 2.0.0rc 3f387a9 develop fork; do e2e/wire/build_wire.sh "$ref"; done
 fi
 
 if [ "$DOCKER" = 1 ]; then
@@ -63,7 +65,7 @@ if [ "$E2E" = 1 ]; then
   "$PY" e2e/run_e2e.py -f all -b local
   stage "4b. simulator e2e, real app image (docker)"
   docker build -q -t send_to_x3:e2e send_to_x3 >/dev/null
-  "$PY" e2e/run_e2e.py -f releases -b docker
+  "$PY" e2e/run_e2e.py -f releases,fork -b docker
 fi
 
 if [ "$SUPERVISOR" = 1 ]; then

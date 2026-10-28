@@ -1,0 +1,3 @@
+URL=https://github.com/crosspoint-reader/crosspoint-reader.git
+# develop on 2026-10-28; firmware/patches/ apply on top of it.
+COMMIT=8f4d035cbc56ae226f0881cfce85f65243988e1b

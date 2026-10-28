@@ -339,3 +339,62 @@ async def test_status_matches_app_state_contract(device, opts, store):
         await wait_until(lambda: state.status["lan_push"]["state"] == "ok")
         shown = app_state.normalize_status(state.status["lan_push"])
     assert shown["state"] == "ok" and "Shown.epub" in shown["detail"] and shown["updated"] > 0
+
+
+# ------------------------------------------------- pushed names stay reserved (APP-1)
+
+
+@pytest.fixture
+def processor(monkeypatch, store, opts):
+    from sendtox3 import ingest
+    from sendtox3.render.names import unique_title
+
+    from test_web_fakes import install_fakes
+
+    web = install_fakes(monkeypatch)
+    monkeypatch.setattr(ingest, "unique_title", unique_title)  # the real one: FAT names ignore case
+    return web, ingest.Processor(store, opts)
+
+
+async def test_pushed_title_is_not_reused_after_delete(device, opts, store, processor):
+    """/Inbox/Weekly digest.epub stays on the card: a later item with that title would
+    be saved over it by the catalog, or, on the Send to X3 firmware, its row would open
+    the old file and never download the new one."""
+    from sendtox3.models import IngestRequest
+
+    web, proc = processor
+    web.add("https://example.com/w1", "Weekly digest")
+    first = await proc.process(IngestRequest(url="https://example.com/w1"))
+    state = make_state(opts, store, device.host)
+    async with running(state):
+        await wait_until(lambda: not store.pending_items())
+    assert device.listdir("/Inbox") == ["Weekly digest.epub"]
+    store.delete(first.id)
+    store.prune(1, now=10 ** 12)  # and much later: pushed names never expire either
+    web.add("https://example.com/w2", "weekly DIGEST")
+    second = await proc.process(IngestRequest(url="https://example.com/w2"))
+    assert second.title == "weekly DIGEST (2)"
+
+
+async def test_numbered_push_names_are_reserved(device, opts, store, processor):
+    """The name on the card, not just the title: Report (2).epub, and the numbered
+    identical copy an item is matched to."""
+    from sendtox3.models import IngestRequest
+
+    web, proc = processor
+    device.write("/Inbox/Report.epub", b"someone else's book")
+    report = add(store, "Report", 1)
+    device.write("/Inbox/Saved (3).epub", b"EPUB:Saved")
+    device.write("/Inbox/Saved.epub", b"a different book with the same title")
+    saved = add(store, "Saved", 2)
+    state = make_state(opts, store, device.host)
+    async with running(state):
+        await wait_until(lambda: not store.pending_items())
+    assert device.read("/Inbox/Report (2).epub") == b"EPUB:Report" and uploads(device) == 1
+    assert {"Report", "Report (2)", "Saved", "Saved (3)"} <= store.issued_titles()
+    store.delete(report.id)
+    store.delete(saved.id)
+    for n, raw in enumerate(("Report (2)", "saved (3)")):
+        web.add(f"https://example.com/r{n}", raw)
+        item = await proc.process(IngestRequest(url=f"https://example.com/r{n}"))
+        assert item.title == {"Report (2)": "Report (3)", "saved (3)": "saved (4)"}[raw]

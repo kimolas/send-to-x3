@@ -18,10 +18,22 @@ Environment the simulator understands (crosspoint-simulator README and src/):
 ``CROSSPOINT_SIM_WIFI_CONNECT=fail|no-ssid|timeout``, ``CROSSPOINT_SIM_WIFI_NETWORKS``,
 ``CROSSPOINT_SIM_FREE_HEAP``, ``CROSSPOINT_SIM_MAX_ALLOC_HEAP``. Never set
 ``CROSSPOINT_SIM_HTTP_MOCK_ROOT``: it answers any URL whose basename matches a local file.
+
+Software restarts: upstream, ``ESP.restart()`` is a no-op, so the firmware's silent
+restart continues in the same process. Simulators built with
+``e2e/sim/patches/simulator/0001-real-software-restart.patch`` (the ``fork`` build)
+relaunch instead when ``CROSSPOINT_SIM_RESTART=exec`` (``run_sim(restart="exec")``):
+they keep the RTC_NOINIT variables, print ``[SIM] software restart: relaunching``,
+``execvp`` themselves (same pid and serial pipe) and run
+``CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART`` / ``..._SCREENSHOTS_AFTER_RESTART``
+(``after_restart``), timed from the relaunch, never the old schedule.
+:meth:`SimRun.boots` splits the serial log at each relaunch.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import signal
@@ -36,9 +48,12 @@ from typing import Callable, Iterable, Mapping, Optional, Pattern, Union
 from . import images
 
 KEYS = {"BACK", "ENTER", "LEFT", "RIGHT", "UP", "DOWN", "POWER", "SLEEP", "HOME"}
+REPO = Path(__file__).resolve().parents[2]
 DEFAULT_WORK = Path(os.environ.get("SENDTOX3_E2E_WORK", Path.home() / ".cache" / "sendtox3-e2e"))
 
 _ACTIVITY_RE = re.compile(r"\[ACT\] Entering activity: (\S+)")
+_RELAUNCH_RE = re.compile(r"^\[SIM\] software restart: relaunching.*$", re.M)
+_SILENT_RESTART_RE = re.compile(r"Silent restart \(target=([\w-]+)\)")
 _LOG_RE = re.compile(r"^\[(\d+)\] \[(DBG|INF|ERR|WRN)\] \[([^\]]+)\] (.*)$")
 
 
@@ -52,6 +67,79 @@ def find_program(ref: str) -> Path:
     if not p.is_file() or not os.access(p, os.X_OK):
         raise FileNotFoundError(f"no simulator for {ref} at {p}; run: e2e/sim/build_sim.sh {ref}")
     return p
+
+
+# ---------------------------------------------------------------------------------------
+# Build provenance
+# ---------------------------------------------------------------------------------------
+
+
+class StaleBuild(RuntimeError):
+    """The simulator for a ref was built from other inputs than this checkout has now."""
+
+
+def build_info(ref: str) -> dict:
+    """The ``build-info.json`` that ``build_sim.sh <ref>`` wrote next to the binary
+    (commits, patch blob ids, simulator worktree, build time); {} when there is none."""
+    try:
+        return json.loads((work_dir() / "bin" / ref.replace("/", "_") / "build-info.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _blob(p: Path) -> str:
+    """``git hash-object`` of a file: the id build_sim.sh records for each patch."""
+    data = p.read_bytes()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def expected_build(ref: str) -> dict:
+    """What ``build_sim.sh <ref>`` builds from in this checkout: develop's pin and the
+    fork's base (``firmware/UPSTREAM``), and the default patch sets (the fork's
+    ``firmware/patches/`` and ``e2e/sim/patches/simulator/``; none for other refs)."""
+    want: dict = {"firmware_patches": [], "simulator_patches": []}
+    if ref == "develop":
+        m = re.search(r'^DEVELOP_SHA="([0-9a-f]{40})"$', (REPO / "e2e" / "sim" / "build_sim.sh").read_text("utf-8"),
+                      re.M)
+        want["firmware_commit"] = m.group(1) if m else ""
+    elif ref == "fork":
+        upstream = (REPO / "firmware" / "UPSTREAM").read_text("utf-8")
+        want["firmware_commit"] = next((ln.split("=", 1)[1].strip() for ln in upstream.splitlines()
+                                        if ln.startswith("COMMIT=")), "")
+        want["firmware_patches"] = [_blob(p) for p in sorted((REPO / "firmware" / "patches").glob("*.patch"))]
+        want["simulator_patches"] = [_blob(p) for p in sorted((REPO / "e2e" / "sim" / "patches" / "simulator")
+                                                              .glob("*.patch"))]
+    return want
+
+
+def stale_build(ref: str) -> list[str]:
+    """Why the binary for ``ref`` is not what ``build_sim.sh <ref>`` would build from this
+    checkout now; empty when it is. (The script's own stamp also covers the simulator
+    pin and the script itself; the patches and base commit are what change often.)"""
+    info = build_info(ref)
+    if not info:
+        return ["no build-info.json"]
+    def ids(blobs: list[str]) -> str:
+        return ",".join(b[:8] for b in blobs) or "none"
+
+    want = expected_build(ref)
+    why = []
+    if "firmware_commit" in want and info.get("firmware_commit") != want["firmware_commit"]:
+        why.append(f"built from firmware {str(info.get('firmware_commit'))[:12]}, "
+                   f"expected {want['firmware_commit'][:12]}")
+    for key, where in (("firmware_patches", "firmware/patches"), ("simulator_patches", "e2e/sim/patches/simulator")):
+        have = [str(p.get("blob")) for p in info.get(key) or []]
+        if have != want[key]:
+            why.append(f"{key.replace('_', ' ')} differ from {where} (built {ids(have)}, now {ids(want[key])})")
+    return why
+
+
+def check_build(ref: str) -> None:
+    """Raise :class:`StaleBuild` when the binary for ``ref`` is out of date."""
+    why = stale_build(ref)
+    if why:
+        raise StaleBuild(f"stale {ref} simulator: {'; '.join(why)}. "
+                         f"Run e2e/sim/build_sim.sh {ref}, or pass --build to run_e2e.py")
 
 
 def free_port(pair: bool = False) -> int:
@@ -224,6 +312,9 @@ class SimRun:
     shots: dict[str, Shot]
     env: dict[str, str]
     watch_errors: list[str] = field(default_factory=list)
+    # Wall-clock time (time.time(), as WireTap exchanges) of each relaunch line, to order
+    # the process's restarts against the HTTP requests it made.
+    relaunched_at: list[float] = field(default_factory=list)
 
     @property
     def log(self) -> str:
@@ -239,12 +330,29 @@ class SimRun:
             out.append(line)
         return out
 
-    def activities(self) -> list[str]:
-        """Activities entered, in order (``Activity::onEnter`` logs every one)."""
-        return _ACTIVITY_RE.findall(self.log)
+    def boots(self) -> list[str]:
+        """The serial log split at each software-restart relaunch (``restart="exec"``):
+        one entry per process image, the first being the initial boot."""
+        return _RELAUNCH_RE.split(self.log)
 
-    def entered(self, name: str) -> bool:
-        return name in self.activities()
+    def _text(self, boot: Optional[int]) -> str:
+        if boot is None:
+            return self.log
+        boots = self.boots()
+        return boots[boot] if -len(boots) <= boot < len(boots) else ""
+
+    def activities(self, boot: Optional[int] = None) -> list[str]:
+        """Activities entered, in order (``Activity::onEnter`` logs every one); with
+        ``boot``, only those of that boot (an index into :meth:`boots`)."""
+        return _ACTIVITY_RE.findall(self._text(boot))
+
+    def entered(self, name: str, boot: Optional[int] = None) -> bool:
+        return name in self.activities(boot)
+
+    def silent_restarts(self, boot: Optional[int] = None) -> list[str]:
+        """Targets of the firmware's silent restarts, in order (``main.cpp``
+        ``silentRestartTo``: ``[MAIN] Silent restart (target=reader)``)."""
+        return _SILENT_RESTART_RE.findall(self._text(boot))
 
     def find(self, pattern: str) -> list[re.Match[str]]:
         return list(re.finditer(pattern, self.log, re.M))
@@ -266,6 +374,7 @@ class SimRun:
             "stopped_early": self.stopped_early,
             "serial_log": str(self.serial_path),
             "activities": self.activities(),
+            "boots": len(self.boots()),
             "screenshots": {k: str(v.png or v.bmp) for k, v in self.shots.items() if v.taken},
             "watch_errors": self.watch_errors,
         }
@@ -285,14 +394,22 @@ def run_sim(
     stop_grace_ms: int = 800,
     timeout_s: Optional[float] = None,
     after_wake: Optional[InputScript] = None,
+    restart: Optional[str] = None,
+    after_restart: Optional[InputScript] = None,
     png: bool = True,
 ) -> SimRun:
     """Run the simulator once and collect its serial log and screenshots.
 
-    ``timeout_s`` defaults to the script's end plus 20 s. ``stop_when`` ends the run
-    ``stop_grace_ms`` after it first returns true once every scheduled screenshot has
-    been saved. On timeout or early stop the process (and anything it spawned) gets
-    SIGTERM, then SIGKILL after 3 s.
+    ``restart="exec"`` makes the firmware's software restarts relaunch the process
+    (simulators with the restart patch only; others ignore it), and ``after_restart``
+    is the input and screenshot schedule of the relaunched process. A run without a
+    restart never uses it, so give the main script its own QUIT.
+
+    ``timeout_s`` defaults to the end of every script given plus 20 s. ``stop_when``
+    ends the run ``stop_grace_ms`` after it first returns true once every scheduled
+    screenshot (after-wake and after-restart ones included) has been saved. On timeout
+    or early stop the process (and anything it spawned) gets SIGTERM, then SIGKILL
+    after 3 s.
     """
     program = Path(program).resolve()
     sd_root = Path(sd_root).resolve()
@@ -302,6 +419,16 @@ def run_sim(
     for old in shot_dir.glob("*.bmp"):
         old.unlink()
     serial_path = out_dir / "serial.log"
+
+    if restart not in (None, "exec"):
+        raise ValueError(f"restart must be None or 'exec', not {restart!r}")
+    if after_restart is not None and restart is None:
+        raise ValueError("after_restart needs restart='exec' (otherwise ESP.restart() is a no-op)")
+    schedules = [script] + [s for s in (after_wake, after_restart) if s is not None]
+    all_shots = [sh for s in schedules for sh in s.shots]
+    names = [sh.name for sh in all_shots]
+    if len(set(names)) != len(names):
+        raise ValueError(f"screenshot names must be unique across the schedules: {names}")
 
     run_env = {k: v for k, v in os.environ.items() if not k.startswith("CROSSPOINT_")}
     run_env.update({
@@ -315,15 +442,21 @@ def run_sim(
     if after_wake is not None:
         run_env["CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_WAKE"] = after_wake.input_spec()
         run_env["CROSSPOINT_SIM_SCREENSHOTS_AFTER_WAKE"] = after_wake.screenshot_spec(shot_dir)
+    if restart is not None:
+        run_env["CROSSPOINT_SIM_RESTART"] = restart
+    if after_restart is not None:
+        run_env["CROSSPOINT_SIM_INPUT_SCRIPT_AFTER_RESTART"] = after_restart.input_spec()
+        run_env["CROSSPOINT_SIM_SCREENSHOTS_AFTER_RESTART"] = after_restart.screenshot_spec(shot_dir)
     if env:
         run_env.update(env)
     if run_env.get("CROSSPOINT_SIM_HTTP_MOCK_ROOT"):
         raise ValueError("CROSSPOINT_SIM_HTTP_MOCK_ROOT would bypass the backend under test")
 
-    limit = timeout_s if timeout_s is not None else script.end_ms / 1000 + 20
+    limit = timeout_s if timeout_s is not None else sum(s.end_ms for s in schedules) / 1000 + 20
     watch_list = list(watches)
     watch_threads: list[threading.Thread] = []
     watch_errors: list[str] = []
+    relaunched_at: list[float] = []
 
     def fire(w: Watch, line: str) -> None:
         try:
@@ -344,6 +477,8 @@ def run_sim(
             assert proc.stdout is not None
             for raw in iter(proc.stdout.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                if _RELAUNCH_RE.match(line):
+                    relaunched_at.append(time.time())
                 log_f.write(line + "\n")
                 log_f.flush()
                 for w in watch_list:
@@ -372,7 +507,7 @@ def run_sim(
                     hit = False
                 # Never cut a run short before its scheduled screenshots exist.
                 if hit and condition_since is None and all(
-                        (shot_dir / f"{sh.name}.bmp").exists() for sh in script.shots):
+                        (shot_dir / f"{sh.name}.bmp").exists() for sh in all_shots):
                     condition_since = now
                 if condition_since is not None and (now - condition_since) * 1000 >= stop_grace_ms:
                     stopped_early = True
@@ -386,7 +521,7 @@ def run_sim(
     seconds = time.monotonic() - start
 
     shots: dict[str, Shot] = {}
-    for spec in script.shots + (after_wake.shots if after_wake else []):
+    for spec in all_shots:
         shot = Shot(spec.name, spec.at_ms, shot_dir / f"{spec.name}.bmp")
         if shot.taken:
             try:
@@ -401,7 +536,7 @@ def run_sim(
     return SimRun(name=name, program=program, out_dir=out_dir, sd_root=sd_root, returncode=proc.returncode,
                   seconds=seconds, timed_out=timed_out, stopped_early=stopped_early, serial_path=serial_path,
                   shots=shots, env={k: v for k, v in run_env.items() if k.startswith("CROSSPOINT_")},
-                  watch_errors=watch_errors)
+                  watch_errors=watch_errors, relaunched_at=relaunched_at)
 
 
 def _terminate(proc: subprocess.Popen) -> None:

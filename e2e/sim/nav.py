@@ -55,12 +55,19 @@ class Nav:
     """Appends navigation steps to an :class:`InputScript`."""
 
     def __init__(self, fw: Firmware, script: InputScript, *, plugins_enabled: bool = True,
-                 has_opds_servers: bool = False, recent_books: int = 0, waits: Optional[Waits] = None) -> None:
+                 has_opds_servers: bool = False, recent_books: int = 0, catalog_opens: Optional[bool] = None,
+                 waits: Optional[Waits] = None) -> None:
+        """``recent_books``: rows Home shows for books read on this card, which come
+        before its menu (at most :data:`~e2e.sim.firmware.HOME_RECENT_ROWS`).
+        ``catalog_opens``: whether Confirm on a catalog row opens the book; by default
+        whether the build reads ``download.open`` (every bundle sets it), False for a
+        card whose device.json has none (:func:`~e2e.sim.sd.drop_download_open`)."""
         self.fw = fw
         self.s = script
         self.plugins_enabled = plugins_enabled and fw.plugins
         self.has_opds = has_opds_servers
         self.recent_books = recent_books
+        self.catalog_opens = fw.opens_after_download and (catalog_opens is None or catalog_opens)
         self.w = waits or Waits.from_env()
 
     # -- generic --------------------------------------------------------------------------
@@ -99,11 +106,24 @@ class Nav:
         return self.select(rows.index(title), wait_ms=wait_ms if wait_ms is not None else self.w.catalog_load)
 
     def catalog_fetch(self, row: int, *, wait_ms: Optional[int] = None) -> "Nav":
-        """In a catalog list (selection on row 0): fetch ``row``; leaves "Download complete"."""
-        return self.select(row, wait_ms=wait_ms if wait_ms is not None else self.w.download)
+        """In a catalog list (selection on row 0): fetch ``row``; leaves "Download complete".
+
+        With ``download.open`` on a build that reads it (``catalog_opens``) Confirm
+        instead ends the catalog: the book downloads (or is already on the card)
+        and the firmware restarts into the reader. With ``run_sim(restart="exec")`` the
+        reader comes up in a relaunched process, so what follows belongs in
+        ``after_restart``; otherwise it opens in the same process. Either way there is no
+        "Download complete" to :meth:`dismiss`.
+        """
+        if wait_ms is None:
+            wait_ms = self.w.download + (self.w.open_book if self.catalog_opens else 0)
+        return self.select(row, wait_ms=wait_ms)
 
     def dismiss(self, *, wait_ms: Optional[int] = None) -> "Nav":
         """Confirm a "Download complete" (catalog: back to the list, selection kept)."""
+        if self.catalog_opens:
+            raise ValueError(f"{self.fw.ref} opens catalog books in the reader: there is no "
+                             "\"Download complete\" screen to dismiss")
         self.s.press("ENTER", wait_ms=wait_ms if wait_ms is not None else self.w.open_screen)
         return self
 

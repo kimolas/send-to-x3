@@ -42,13 +42,15 @@ class Result:
     artifacts: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     error: str = ""
+    # The simulator's build-info.json (commits, patch blob ids, build time): what was tested.
+    build: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
             "scenario": self.scenario, "firmware": self.firmware, "backend": self.backend, "status": self.status,
             "seconds": round(self.seconds, 2), "error": self.error, "notes": self.notes,
             "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in self.checks],
-            "runs": self.runs, "artifacts": self.artifacts,
+            "runs": self.runs, "artifacts": self.artifacts, "build": self.build,
         }
 
 
@@ -83,12 +85,17 @@ class Context:
 
     @property
     def program(self) -> Path:
+        """The simulator for this firmware: a skip when it was never built, an error
+        (:class:`~e2e.sim.runner.StaleBuild`) when it was built from other patches or
+        another base commit than this checkout has (``run_e2e.py --build`` rebuilds)."""
         if self.program_override:
             return self.program_override
         try:
-            return runner.find_program(self.fw.ref)
+            program = runner.find_program(self.fw.ref)
         except FileNotFoundError as e:
             raise SkipScenario(str(e)) from None
+        runner.check_build(self.fw.ref)
+        return program
 
     def defer(self, fn: Callable[[], None]) -> None:
         self._cleanups.append(fn)

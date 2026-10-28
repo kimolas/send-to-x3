@@ -71,7 +71,8 @@ def _check_landed(ctx: Context, card: sdmod.SdCard, label: str, ex, ev: str, ts:
         ctx.check(f"{label}: valid EPUB, {chapters} chapter(s)" + (f", title {title!r}" if title else ""), ok, info)
 
 
-@scenario("S2", "sleep auto-delivery (200 digest, 404 keeps queue, retry)", firmwares=("2.0.0rc", "3f387a9"))
+@scenario("S2", "sleep auto-delivery (200 digest, 404 keeps queue, retry)",
+          firmwares=("2.0.0rc", "3f387a9", "develop", "fork"))
 def run(ctx: Context) -> None:
     backend, tap = ctx.start_backend(extra_options={"auto_delivery": True})  # off by default
     token = f"Bearer {backend.device_token}"

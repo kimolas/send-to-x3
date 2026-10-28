@@ -13,7 +13,10 @@
 // The `catalog` and `download` commands mirror PluginCatalogActivity at 2.0.0rc
 // (loadManifest :226-328, substituted :396-418, downloadDir :420-431,
 // fetchBrowseResponse :637-671, parseBrowseResponse :752-837, downloadBook :1041-1138),
-// without the UI, compatibility filtering, lists, search, auth flows or bundles.
+// without the UI, compatibility filtering, lists, search, auth flows or bundles. Built
+// with WIRE_PAGING_STYLES (build_wire.sh sets it for checkouts that have develop's
+// c3b16da) they page like develop instead: {limit} by the template's paging style and
+// {offset} filled in (PluginCatalogActivity.cpp:409-412, PluginCatalogPaging.h).
 // `sleep` and `drain` run the real pluginevents::emit/drain; a successful `download`
 // queues book.downloaded like PluginCatalogActivity does.
 //
@@ -44,6 +47,9 @@
 #include "util/PluginEvents.h"
 #include "util/PluginHttp.h"
 #include "util/StringUtils.h"
+#if WIRE_PAGING_STYLES
+#include "activities/plugins/PluginCatalogPaging.h"
+#endif
 
 ESPMock ESP;
 HWCDC Serial;
@@ -160,8 +166,15 @@ struct Catalog {
     pluginhttp::substituteAll(tpl, "{plugin_api}", num);
     snprintf(num, sizeof(num), "%d", page);
     pluginhttp::substituteAll(tpl, "{page}", num);
+#if WIRE_PAGING_STYLES
+    snprintf(num, sizeof(num), "%d", plugincatalogpaging::limitFor(paging(), m.pageSize));
+    pluginhttp::substituteAll(tpl, "{limit}", num);
+    snprintf(num, sizeof(num), "%d", std::max(0, page - 1) * m.pageSize);
+    pluginhttp::substituteAll(tpl, "{offset}", num);
+#else
     snprintf(num, sizeof(num), "%d", m.pageSize + 1);
     pluginhttp::substituteAll(tpl, "{limit}", num);
+#endif
     pluginhttp::substituteAll(tpl, "{query}", "");
     pluginhttp::substituteAll(tpl, "{query_raw}", "");
     if (item) {
@@ -172,6 +185,12 @@ struct Catalog {
     }
     return tpl;
   }
+
+#if WIRE_PAGING_STYLES
+  plugincatalogpaging::Paging paging() const {
+    return plugincatalogpaging::pagingOf(m.browseReq.url, m.browseReq.body, m.browseReq.headers);
+  }
+#endif
 
   pluginhttp::Headers substitutedHeaders(const pluginhttp::Headers& headers, const Item* item) const {
     pluginhttp::Headers out;
@@ -231,7 +250,12 @@ int browse(Catalog& c, freeink::SecureHttpClient& session, std::vector<Item>& it
     return 5;
   }
   hasMore = static_cast<int>(items.size()) > c.m.pageSize;
-  if (hasMore) items.resize(c.m.pageSize);
+#if WIRE_PAGING_STYLES
+  // Sized pages carry no lookahead row: a full page shows Next (PluginCatalogPaging.h:55-57).
+  hasMore = hasMore || (c.paging() == plugincatalogpaging::Paging::SizedPages &&
+                        static_cast<int>(items.size()) >= c.m.pageSize);
+#endif
+  if (static_cast<int>(items.size()) > c.m.pageSize) items.resize(c.m.pageSize);
   printf("@{\"type\":\"browse\",\"status\":%d,\"url\":%s,\"rows\":%zu,\"has_more\":%s,\"state\":\"BROWSING\"}\n",
          status, jsonStr(url).c_str(), items.size(), hasMore ? "true" : "false");
   for (size_t i = 0; i < items.size(); i++) {

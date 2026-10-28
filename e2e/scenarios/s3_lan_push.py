@@ -95,7 +95,8 @@ def _push(ctx: Context, fmt: str) -> None:
         ctx.check(p + "backend marked both items delivered.push", all(pushed.values()) and len(pushed) == 2, pushed)
 
 
-@scenario("S3", "LAN push into the File Transfer server (epub and txt)", firmwares=("2.0.0rc", "1.6.5"))
+@scenario("S3", "LAN push into the File Transfer server (epub and txt)",
+          firmwares=("2.0.0rc", "1.6.5", "develop", "fork"))
 def run(ctx: Context) -> None:
     for fmt in ("epub", "txt"):
         _push(ctx, fmt)

@@ -5,7 +5,10 @@ and read it a moment later on your **Xteink X3** as clean, image-free text.
 
 Send to X3 is a Home Assistant app (Home Assistant's new name for add-ons) that runs
 on your Raspberry Pi. It works with the X3's **stock CrossPoint firmware**: nothing on
-the reader is modified, and nothing needs to be reachable from the internet.
+the reader needs to be modified, and nothing needs to be reachable from the internet.
+If you want to read right from the plugin page, the optional **Send to X3 firmware**
+(CrossPoint plus one change) opens the book you pick in **Home > Plugins > Send to X3**
+right away (books delivered at sleep or by LAN push wait in the Library as usual).
 
 ```
  Phone / computer                     Raspberry Pi (Home Assistant OS)        Xteink X3 (stock CrossPoint)
@@ -38,6 +41,11 @@ the reader is modified, and nothing needs to be reachable from the internet.
 - **You decide when it arrives:** on the X3 open **Home > Plugins > Send to X3** and
   press **Confirm** on the first row, **Get 3 new**: everything shared since last time
   arrives as one book. Nothing is downloaded by itself.
+- **Read right away (optional):** on the [Send to X3 firmware](docs/FIRMWARE.md) that
+  button says **Open**: the book downloads and opens in the reader, and **Open** again
+  on a single item's row opens the copy it saved where you left off. It installs from
+  the SD card with the X3's own firmware updater, and you can go back to the official
+  firmware the same way. Not yet tried on a real X3 (only in the simulator).
 - **Ways onto the X3:** the CrossPoint 2.x plugin (**Get 3 new**, a catalog of
   everything shared, and optional delivery at sleep), the OPDS feed for CrossPoint
   1.6.5 and later (with the same **Get 3 new** entry), and LAN push to the X3's File
@@ -68,6 +76,9 @@ Good to know before you choose:
 - **1.6.5** (stable) has no plugins: you pick items in the X3's OPDS Browser, and/or
   new items are copied whenever the X3's File Transfer screen is open. Staying on 1.6.5
   is fine.
+- The **Send to X3 firmware** is 2.x (CrossPoint develop of 2026-10-28) plus one
+  change: pressing **Open** in the plugin opens the book. You build it on a Mac with
+  Docker; see [the firmware guide](docs/FIRMWARE.md).
 - On either phone, the **Home Assistant Companion app**'s share sheet works with no
   setup at all, and **email** works from anywhere once
   [Part 6](docs/SETUP.md#part-6-email-optional-works-from-anywhere) is done.
@@ -86,12 +97,14 @@ Good to know before you choose:
 | [iPhone and iPad](docs/phone-ios.md) | The Send to X3 shortcut, the Companion app, email |
 | [Android](docs/phone-android.md) | HTTP Shortcuts, the Companion app, email |
 | [PDFs](docs/pdf.md) | What converts well, limits, OCR |
+| [The Send to X3 firmware](docs/FIRMWARE.md) | Optional: read right from the plugin page. What it changes, installing it from the SD card, going back, building it |
 | [App options](send_to_x3/DOCS.md) | Every option (also the app's Documentation tab in Home Assistant) |
 
 For developers: [developing](docs/DEVELOPMENT.md), [testing](docs/TESTING.md),
 [architecture and contracts](docs/ARCHITECTURE.md),
 [phone shortcut generators](shortcuts/README.md),
 [firmware end-to-end tests](e2e/README.md),
+[building the Send to X3 firmware](firmware/README.md),
 [Home Assistant packaging checks](e2e/ha/README.md) and
 [CrossPoint parser harnesses](e2e/fwharness/README.md). `scripts/check_all.sh` runs the
 unit and integration tests; `scripts/check_all.sh --all` runs every verification level

@@ -8,7 +8,8 @@ Daily use, once [setup](SETUP.md) is done. Example addresses: the Pi is
 | Your setup | You do | It arrives |
 |---|---|---|
 | CrossPoint 2.x (the default) | Share from the phone, then on the X3 open **Home > Plugins > Send to X3** and press **Confirm** on the first row, **Get 3 new** | Right away: one EPUB with everything new (one new item keeps its own title) |
-| CrossPoint 2.x, one item | Share, then **Home > Plugins > Send to X3** and select the item below the first row | Right away, one file for that item |
+| The [Send to X3 firmware](FIRMWARE.md) | The same; the button says **Open** | Right away, and the book opens in the reader |
+| CrossPoint 2.x, one item | Share, then **Home > Plugins > Send to X3** and select the item below the first row | Right away, one file for that item (opened in the reader on the Send to X3 firmware) |
 | CrossPoint 2.x, with the optional delivery at sleep | Share, then put the X3 to sleep at home (on 2.0.0rc: open the plugin first) | At the next sleep: one EPUB with everything new |
 | CrossPoint 1.6.5, OPDS | Share, then **Home > OPDS Browser** and select the first entry, **Get 3 new**, or a single item | Right away |
 | Any firmware, LAN push | Share, then on the X3 open **File Transfer > Join a Network** for half a minute | All new items, one file each |
@@ -64,8 +65,9 @@ the web UI use a version cleaned so the X3 accepts it as a file name: for exampl
 `...` becomes `…`, `/` or `:` become dashes, `?` is dropped, and it is cut to 90
 bytes. Emoji are removed everywhere because the X3's fonts cannot show them. A title
 that is already taken gets ` (2)`, ` (3)` and so on; titles of items you fetched from
-the catalog or OPDS stay taken for a year, even after the item is deleted, so a new
-item never replaces a file on the X3.
+the catalog or OPDS, and the names LAN push saved, stay taken for good, even after the
+item is deleted, so a new item never replaces (or, on the Send to X3 firmware, opens)
+a file already on the X3.
 
 With **Download format** (`delivery_format`) set to `txt`, catalog downloads and LAN
 push give plain `.txt` files instead. They show the title as the first line, then
@@ -96,7 +98,9 @@ How they work together:
   by the word count and the site.
 - **Fetching the same item again** from the catalog or OPDS replaces the file and
   starts it from the beginning (the X3 forgets the reading position of a replaced
-  file).
+  file). On the Send to X3 firmware, **Open** on an item whose own row saved it
+  before (the same file name in `/Inbox`) opens that copy where you left off instead,
+  without downloading it again.
 - The web UI's **On the X3** column shows how each item arrived: `fetch` (**Get 3
   new**), `catalog`, `auto` (delivery at sleep), `opds` or `push`, with the time.
   **waiting** means not yet.
@@ -122,6 +126,7 @@ How they work together:
   (the X3 restarts) and open **Send to X3** again, before the list loads. Going back
   only to the plugin list and opening it again keeps Wi-Fi on, so nothing is reported
   yet. (That is why **Home > Plugins** says "Receives: downloads" under the plugin.)
+  The Send to X3 firmware reports right after the download, before it opens the book.
 - Until the report arrives the web UI shows **sent ..., not confirmed yet**, and the
   first row reads **Nothing new right now** with "Your last fetch (...) is confirmed the
   next time the X3 joins Wi-Fi", so pressing Confirm out of habit never replaces the
@@ -131,7 +136,8 @@ How they work together:
   book, the same items are offered again at once, with ` (2)` added to the name: a name
   that was ever sent is never offered again, so no press can replace a book on the X3.
 - With nothing new the row reads **Nothing new right now**. Selecting it shows
-  **Download failed** and changes nothing.
+  **Download failed** and changes nothing (on the Send to X3 firmware too, where the
+  button says **Open**).
 - If the app cannot prepare the download (for example the Home Assistant disk is full)
   the first row reads **New reading could not be prepared**; the items below it still
   download one by one, and the app's log says what went wrong.
@@ -139,6 +145,31 @@ How they work together:
   Pressing an old **Get N new** row can show **Download failed** when the list was
   loaded again elsewhere in the meantime (the OPDS feed, or another page 1) with
   different new items; go back and open **Send to X3** again.
+
+### Reading right from the plugin (Send to X3 firmware)
+
+On the [Send to X3 firmware](FIRMWARE.md) the button on every row of **Home > Plugins >
+Send to X3** says **Open** instead of **Fetch**:
+
+- **Open** on **Get 3 new** (or on a single item): **Downloading...**, then a short
+  **Loading** message, and the X3 restarts straight into the book. The X3 reports the
+  file to the app before it restarts, so the web UI shows `fetch` (or `catalog`) at
+  once and the next **Get N new** never repeats it.
+- **Open** on an item whose own row saved it before (same file name in `/Inbox`) opens
+  that copy where you left off; nothing is downloaded. A **Get N new** row always has a
+  new name, so it always downloads.
+- To go back to a **Get N new** book, open it from Home (recent books) or the
+  **Library**, where it keeps your page. **Open** on one of its items' own rows looks
+  for a file named after the item, so it downloads that item as a separate file,
+  which starts at page 1.
+- A cancelled or failed download opens nothing; the items are offered again as usual.
+- On official CrossPoint the same plugin works as described above: the button says
+  **Fetch** and the book waits in the Library.
+- Only **Open** opens books: deliveries at sleep and by LAN push wait in the Library
+  as usual.
+
+Note: this firmware was tried in the X3 simulator, not yet on a real X3; see
+[The Send to X3 firmware](FIRMWARE.md).
 
 ### Delivery at sleep in detail
 

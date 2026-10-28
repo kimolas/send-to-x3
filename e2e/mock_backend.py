@@ -9,9 +9,11 @@ real app (``run_e2e.py --backend local|docker``):
 - ``POST /api/v1/ingest`` (Bearer ingest token or ``?token=``): JSON, form or text/plain
   ``{url?, text?, title?}``; no fetching (a URL becomes a short note), title made
   firmware-safe (§8 subset), EPUB + TXT rendered immediately.
-- ``GET /device/v1/catalog?page=P&limit=L`` (Bearer device token): a first row "Get N new"
-  (id ``all-<key>``) or "Nothing new right now" (id ``none``), then newest first; offset
-  ``(P-1)*(L-1)`` into that list.
+- ``GET /device/v1/catalog?page=P&limit=L&offset=O`` (Bearer device token): a first row
+  "Get N new" (id ``all-<key>``) or "Nothing new right now" (id ``none``), then newest
+  first; ``limit`` rows of that list from ``O`` when it is a number (develop), else from
+  ``(P-1)*L`` when ``L`` is the page size (develop with an old device.json, no lookahead
+  row), else from ``(P-1)*(L-1)`` (2.0.0rc and 3f387a9 send the literal ``{offset}``).
 - ``GET /device/v1/items/<id>.epub|.txt``: marks ``delivered.catalog``.
 - ``GET /device/v1/items/all-<key>.epub|.txt``: everything new as one file (stored, so
   repeats are byte-identical; titles never repeat); marks ``delivered.fetch``, or with
@@ -60,6 +62,7 @@ from typing import Any, Optional
 
 DIGEST_LIMIT = 900_000
 OPDS_PAGE = 50
+PAGE_SIZE = 8  # the plugin's browse.page_size (e2e/sim/sd.py, the app's delivery.PAGE_SIZE)
 ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567"
 
 
@@ -372,6 +375,17 @@ def _paragraphs(text: str) -> list[str]:
     return [p for p in paras if p]
 
 
+def _fetch_subtitle(items: list[Item], fmt: str) -> str:
+    """The "Get N new" row's subtitle, as the app words it (delivery.fetch_subtitle):
+    ``items`` in bundle order (oldest first), titles listed newest first. Titles are
+    already safe_title'd at ingest, so the app's device_title would not change them."""
+    words = sum(i.word_count for i in items)
+    head = ("Everything new in one book" if fmt == "epub" else "Everything new in one file") + (
+        f" · {words:,} words" if words else "")
+    text = f"{head}: " + "; ".join(i.title for i in reversed(items))
+    return text if len(text) <= 160 else text[:159].rstrip() + "…"
+
+
 def _subtitle(item: Item) -> str:
     when = item.delivered and min(item.delivered.values())
     state = f"Read on X3 {time.strftime('%b %d', time.localtime(when))}" if when else "New"
@@ -496,18 +510,26 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/device/v1/catalog":
                 try:
                     page = max(1, int((q.get("page") or ["1"])[0]))
-                    limit = min(50, max(1, int((q.get("limit") or ["9"])[0])))
+                    limit = min(50, max(1, int((q.get("limit") or [str(PAGE_SIZE + 1)])[0])))
                 except ValueError:
                     return self._send(400, b'{"error":"bad paging"}')
+                raw_offset = (q.get("offset") or [""])[0]
+                if raw_offset.isascii() and raw_offset.isdigit():
+                    off = int(raw_offset)
+                elif limit == PAGE_SIZE:
+                    off = (page - 1) * limit
+                else:
+                    off = (page - 1) * max(1, limit - 1)
                 fmt = self.server.catalog_format
                 bundle = st.fetch_bundle(fmt)
-                first = ({"id": bundle[0], "title": bundle[3], "subtitle": "Everything new in one book"} if bundle
+                first = ({"id": bundle[0], "title": bundle[3],
+                          "subtitle": _fetch_subtitle([st.items[i] for i in bundle[1] if i in st.items], fmt)}
+                         if bundle
                          else {"id": "none", "title": "Nothing new right now",
                                "subtitle": ("Your last fetch is confirmed the next time the X3 joins Wi-Fi."
                                             if st.awaiting() else
                                             "Share something to Send to X3, then open this list again.")})
                 rows = [first] + [{"id": i.id, "title": i.title, "subtitle": _subtitle(i)} for i in st.newest_first()]
-                off = (page - 1) * max(1, limit - 1)
                 return self._json(200, {"items": rows[off:off + limit]})
             if path == "/device/v1/fetched":
                 if self.command != "POST":

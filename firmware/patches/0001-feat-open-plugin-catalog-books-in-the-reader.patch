@@ -1,0 +1,526 @@
+From f51a00d5608a49d6606fd8efa52f717b441c9719 Mon Sep 17 00:00:00 2001
+From: kimolas <4828831+kimolas@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 15:58:48 -0400
+Subject: [PATCH] feat: open plugin catalog books in the reader (download.open)
+
+A JSON plugin catalog can set `download.open: true`. Confirm on a book row
+then opens it in the reader: a copy already at the download destination
+opens as is (no request; layout cache and reading position kept), otherwise
+the book downloads as usual and then opens. Opening records the book in
+state.json and reboots straight into it, the clean-heap reboot every Wi-Fi
+screen does on exit. After a fresh download it first sends the queued
+plugin events while Wi-Fi is still up, under a Loading popup; below the TLS
+heap floor they wait for the next Wi-Fi join. If the book cannot be
+recorded, a fresh download shows the download-complete screen and a copy
+already on the card shows an error.
+
+Bundle rows and files the reader does not open keep the Fetch label and the
+download-complete screen; the rows that open read Open. Older firmware
+ignores the key. Advertised as the capability catalog.open_after_download.
+
+Also adds a `sendtox3` build env (version 2.0.0-sx3+<hash>).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/sd-plugins.md                            |  27 +++
+ platformio.ini                                |  12 ++
+ .../plugins/PluginCatalogActivity.cpp         | 168 ++++++++++++++----
+ .../plugins/PluginCatalogActivity.h           |  15 +-
+ src/activities/plugins/PluginCatalogOpen.h    |  27 +++
+ src/util/FirmwareIdentity.h                   |   2 +-
+ test/CMakeLists.txt                           |   1 +
+ test/plugin_catalog_open/CMakeLists.txt       |   4 +
+ .../PluginCatalogOpenTest.cpp                 |  45 +++++
+ 9 files changed, 269 insertions(+), 32 deletions(-)
+ create mode 100644 src/activities/plugins/PluginCatalogOpen.h
+ create mode 100644 test/plugin_catalog_open/CMakeLists.txt
+ create mode 100644 test/plugin_catalog_open/PluginCatalogOpenTest.cpp
+
+diff --git a/docs/sd-plugins.md b/docs/sd-plugins.md
+index 254475c..7fc05e1 100644
+--- a/docs/sd-plugins.md
++++ b/docs/sd-plugins.md
+@@ -188,6 +188,7 @@ Stock CrossPoint currently advertises these catalog capabilities:
+ | `catalog.compatibility` | JSON catalog entries can be filtered by firmware family, minimum plugin API, and required capabilities. | Any catalog can omit entries that require firmware behavior the current device does not provide, while entries with no compatibility metadata remain backward-compatible. Plugin Hub currently uses this for compatibility-aware discovery. |
+ | `catalog.item_details` | JSON catalog items can open a Details page with selected-row metadata and optional bounded on-demand HTML/text content. | Any catalog can keep browse rows concise while offering richer information before Fetch/Install/Update. Rich metadata is additive and failure falls back to the normal item details view. |
+ | `catalog.encoded_item_fields` | Download, sidecar, and details templates can use the percent-encoded item variables `{id_enc}`, `{title_enc}`, `{author_enc}`, and `{url_enc}`. | A catalog whose URLs carry item text can require this so older firmware, which would send the variable names literally, does not offer the entry. |
++| `catalog.open_after_download` | `download.open` opens a fetched book in the reader, and opens a copy already on the card without fetching it again. | A read-now catalog (a read-later inbox, say) can skip the download-complete screen; older firmware ignores the key and shows that screen. |
+ 
+ Capability names describe firmware behavior available to the entire plugin system.
+ They must not encode Plugin Hub policy or ownership, and another plugin may use the
+@@ -321,6 +322,8 @@ JSON catalogs may also map `description`, `detail_author`, and `repository` for
+                                             // so the plugin's web card can offer the setting
+     "filename": "{title}.epub",             // rendered filename is sanitized to 100 bytes;
+                                             // a conventional extension is preserved
++    "open": true,                           // optional: Confirm opens the book in the reader;
++                                            // a copy already at the destination opens as is
+     "sidecar": {                            // optional per-book metadata file
+       "path": "{dest}.meta.json",             // the book metadata sidecar convention (see plugin-events.md)
+       "body": "{\"book_id\":{id}}"
+@@ -399,6 +402,30 @@ JSON catalogs may also map `description`, `detail_author`, and `repository` for
+   With `resolve_urls`, server-relative URLs resolve against the browse URL's
+   origin. A `config.file` lets values like a server URL and credentials be
+   user-entered (via a browser `plugin.js`) rather than baked into the manifest.
++- **Open in reader** (`download.open`): Confirm on a book row opens it in
++  the reader. If the file the row would download to is already on the card,
++  it opens unchanged: no request, no `book.downloaded`, and its layout cache
++  and reading position are kept; any plugin events still queued wait for the
++  next Wi-Fi join. Otherwise the book downloads as usual (cache reset,
++  sidecar, Library marker, `book.downloaded`), then opens: a Loading popup
++  shows while the queued plugin events, the new `book.downloaded` among them,
++  are sent over the still-connected Wi-Fi (unless the heap is too low for
++  TLS; they then wait for the next join). Opening ends the catalog session:
++  the device reboots straight into the book (the clean-heap reboot every
++  Wi-Fi screen does on exit). An `.epub` at the destination that is not a
++  ZIP is downloaded again. Bundle rows and files the reader does not open
++  (anything but `.epub`, `.txt`, `.md`, `.xtc`) keep the Fetch label and the
++  download-complete screen; the Confirm label reads Open only on rows that
++  open.
++
++  The destination path is the book's identity: whatever file is already there
++  opens instead of the row's own download. Two rows share a file when their
++  names match after sanitizing. The rendered name is cut to 100 bytes, stem
++  first (a long title drops a trailing `{id}`); `/ \ : * ? " < > |` become
++  `_`, control characters are dropped, and leading and trailing spaces and
++  dots are trimmed; and the FAT card ignores case. A catalog whose titles may
++  collide should therefore put the id first, `"{id} {title}.epub"`, or use
++  `"{id}.epub"`; a row whose content changes needs a new id.
+ - **After download**: the book's layout cache is invalidated and the optional
+   sidecar is written. Use the `{dest}.meta.json` convention so the fields ride
+   KOSync progress uploads and event handlers (see `plugin-events.md`).
+diff --git a/platformio.ini b/platformio.ini
+index f96f663..cee5901 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -335,6 +335,18 @@ build_flags =
+   -DENABLE_SERIAL_LOG
+   -DLOG_LEVEL=1 ; Set log level to info for release candidate builds
+ 
++[env:sendtox3]
++; X3/X4 release build of the send-to-x3 branch (download.open). The version
++; suffix keeps the built-in updater from treating official 2.0.0 as newer.
++extends = base, firmware_tuned_c3
++build_flags =
++  ${firmware_tuned_c3.build_flags}
++  -DFREEINK_DEVICE_X4=1
++  -DFREEINK_DEVICE_X3=1
++  -DCROSSPOINT_VERSION=\"${crosspoint.version}-sx3+${sysenv.SENDTOX3_FW_HASH}\"
++  -DENABLE_SERIAL_LOG
++  -DLOG_LEVEL=1 ; Set log level to info for release builds
++
+ [env:slim]
+ extends = base, firmware_tuned_c3
+ build_flags =
+diff --git a/src/activities/plugins/PluginCatalogActivity.cpp b/src/activities/plugins/PluginCatalogActivity.cpp
+index 7e9daf7..4837788 100644
+--- a/src/activities/plugins/PluginCatalogActivity.cpp
++++ b/src/activities/plugins/PluginCatalogActivity.cpp
+@@ -2,7 +2,9 @@
+ 
+ #include <Arduino.h>
+ #include <ArduinoJson.h>
++#include <FontCacheManager.h>
+ #include <FreeInkUIIcon.h>
++#include <FsHelpers.h>
+ #include <GfxRenderer.h>
+ #include <HalStorage.h>
+ #include <I18n.h>
+@@ -24,7 +26,9 @@
+ #include <type_traits>
+ 
+ #include "CrossPointSettings.h"
++#include "CrossPointState.h"
+ #include "MappedInputManager.h"
++#include "SilentRestart.h"
+ #include "activities/reader/DictionaryDefinitionActivity.h"  // plain-text README viewer
+ #include "activities/settings/PluginHubInstallActivity.h"
+ #include "activities/util/ConfirmationActivity.h"
+@@ -153,6 +157,24 @@ void emitBookDownloaded(const std::string& manifestPath, const std::string& path
+   pluginevents::emit(pluginevents::Event::BookDownloaded, vars, 3);
+ }
+ 
++// Files ReaderActivity::create opens: EPUB, TXT and Markdown (the EPUB engine) and XTC.
++bool isReaderBook(const std::string& path) {
++  return FsHelpers::hasReflowableBookExtension(path) || FsHelpers::hasXtcExtension(path);
++}
++
++// A usable copy is already at `path`. An .epub must start like a ZIP, so an error
++// page a server saved under the book's name is downloaded again, not reopened.
++bool bookOnCard(const std::string& path) {
++  if (!FsHelpers::hasEpubExtension(std::string_view(path))) return Storage.exists(path.c_str());
++  HalFile file;
++  if (!Storage.openFileForRead("PCAT", path.c_str(), file)) return false;
++  uint8_t magic[4] = {};
++  const bool zip = file.read(magic, sizeof(magic)) == static_cast<int>(sizeof(magic)) && magic[0] == 'P' &&
++                   magic[1] == 'K' && magic[2] == 3 && magic[3] == 4;
++  file.close();
++  return zip;
++}
++
+ // Streams the browse temp file through a catalog list parser (null on OOM).
+ // False when the reader cannot start or the document is malformed.
+ template <typename Parser>
+@@ -305,6 +327,7 @@ bool PluginCatalogActivity::loadManifest() {
+     return false;
+   }
+   manifest.filenameTpl = dl["filename"] | "{title}.epub";
++  manifest.openAfterDownload = dl["open"] | false;
+   // Multi-file bundle install (generic): base URL + a files array per item.
+   manifest.bundleBasePath = dl["bundle"]["base"] | "";
+   manifest.bundleFilesPath = dl["bundle"]["files"] | "";
+@@ -1004,6 +1027,21 @@ void PluginCatalogActivity::pollAuth() {
+ }
+ 
+ void PluginCatalogActivity::downloadItem(const int itemIndex) {
++  using plugincatalogopen::FetchAction;
++  const bool singleFile = !(manifest.isBundle() && !items[itemIndex].files.empty());
++  std::string dest;
++  const bool haveDest = singleFile && bookDestination(items[itemIndex], dest);
++  const bool readerBook = haveDest && isReaderBook(dest);
++  const FetchAction action = plugincatalogopen::fetchAction(
++      manifest.openAfterDownload, haveDest, readerBook, manifest.openAfterDownload && readerBook && bookOnCard(dest));
++  // Downloading again would clear the copy's layout cache and reading position.
++  if (action == FetchAction::OpenExisting) {
++    LOG_INF("PCAT", "Already on the card: %s", dest.c_str());
++    // Nothing to fall back to (no download ran), so the press fails visibly.
++    if (!openDownloadedBook(dest, false)) fail(StrId::STR_FILE_OPEN_FAILED);
++    return;
++  }
++
+   // Own only the selected item's metadata while TLS needs the catalog's heap.
+   Item item;
+   {
+@@ -1015,9 +1053,12 @@ void PluginCatalogActivity::downloadItem(const int itemIndex) {
+     std::vector<Item>().swap(items);
+   }
+   requestUpdateAndWait();
+-  const auto result = manifest.isBundle() && !item.files.empty() ? downloadBundle(item) : downloadBook(item);
++  const auto result = !singleFile ? downloadBundle(item)
++                      : haveDest  ? downloadBook(item, dest)
++                                  : HttpDownloader::FILE_ERROR;  // unsafe filename, logged
+   session.reset();
+   item = {};
++  if (result == HttpDownloader::OK && action == FetchAction::DownloadThenOpen && openDownloadedBook(dest, true)) return;
+   // Reuse the SD response without another network request or resetting navigation.
+   if (!parseBrowseResponse()) return;
+   session = makeUniqueNoThrow<freeink::SecureHttpClient>();
+@@ -1112,7 +1153,7 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBundle(const Item&
+   return HttpDownloader::OK;
+ }
+ 
+-HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& item) {
++HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& item, const std::string& dest) {
+   // Resolve the file URL: either the template itself, or one API hop away.
+   std::string fileUrl;
+   if (!manifest.dlUrlPath.empty()) {
+@@ -1137,32 +1178,6 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& it
+     return HttpDownloader::FILE_ERROR;
+   }
+ 
+-  const std::string folderDir = downloadDir();
+-  const char* folder = folderDir.c_str();
+-  bool haveFolder = folder[0] != '\0';
+-  if (haveFolder && !Storage.exists(folder) && !Storage.mkdir(folder)) {
+-    LOG_ERR("PCAT", "mkdir failed for %s, using SD root", folder);
+-    haveFolder = false;
+-  }
+-
+-  // Sanitize after substitution so the byte limit applies to the complete
+-  // filename and does not remove an extension already present in {title}.
+-  const std::string filename =
+-      StringUtils::sanitizeFilenamePreservingExtension(substituted(manifest.filenameTpl, &item));
+-  if (filename.empty() || filename.find("..") != std::string::npos || filename.find('/') != std::string::npos) {
+-    LOG_ERR("PCAT", "unsafe filename rejected: %s", filename.c_str());
+-    return HttpDownloader::FILE_ERROR;
+-  }
+-  std::string dest;
+-  dest.reserve((haveFolder ? folderDir.size() : 0) + 1 + filename.size());
+-  if (haveFolder) dest += folder;
+-  dest += '/';
+-  dest += filename;
+-  if (!protectedpaths::isPluginPath(dest)) {
+-    LOG_ERR("PCAT", "unsafe download dest rejected: %s", dest.c_str());
+-    return HttpDownloader::FILE_ERROR;
+-  }
+-
+   // url_path already authenticated the JSON hop; the resolved file URL must not
+   // inherit those headers (S3 pre-signed GETs reject a second Authorization).
+   const auto fetchFile = [&] {
+@@ -1211,6 +1226,95 @@ HttpDownloader::DownloadError PluginCatalogActivity::downloadBook(const Item& it
+   return HttpDownloader::OK;
+ }
+ 
++bool PluginCatalogActivity::bookDestination(const Item& item, std::string& dest) {
++  const std::string folderDir = downloadDir();
++  const char* folder = folderDir.c_str();
++  bool haveFolder = folder[0] != '\0';
++  if (haveFolder && !Storage.exists(folder) && !Storage.mkdir(folder)) {
++    LOG_ERR("PCAT", "mkdir failed for %s, using SD root", folder);
++    haveFolder = false;
++  }
++
++  // Sanitize after substitution so the byte limit applies to the complete
++  // filename and does not remove an extension already present in {title}.
++  const std::string filename =
++      StringUtils::sanitizeFilenamePreservingExtension(substituted(manifest.filenameTpl, &item));
++  if (filename.empty() || filename.find("..") != std::string::npos || filename.find('/') != std::string::npos) {
++    LOG_ERR("PCAT", "unsafe filename rejected: %s", filename.c_str());
++    return false;
++  }
++  dest.clear();
++  dest.reserve((haveFolder ? folderDir.size() : 0) + 1 + filename.size());
++  if (haveFolder) dest += folder;
++  dest += '/';
++  dest += filename;
++  if (!protectedpaths::isPluginPath(dest)) {
++    LOG_ERR("PCAT", "unsafe download dest rejected: %s", dest.c_str());
++    return false;
++  }
++  return true;
++}
++
++bool PluginCatalogActivity::rowOpensInReader(const Item& item) const {
++  const bool singleFile = !(manifest.isBundle() && !item.files.empty());
++  // downloadItem() checks the destination's extension, which is the filename's.
++  // Catalogs without download.open skip the string work (the footer asks on
++  // every render).
++  const bool readerBook =
++      manifest.openAfterDownload && singleFile &&
++      isReaderBook(StringUtils::sanitizeFilenamePreservingExtension(substituted(manifest.filenameTpl, &item)));
++  return plugincatalogopen::opensInReader(manifest.openAfterDownload, singleFile, readerBook);
++}
++
++// The same clean-heap reboot every Wi-Fi screen does on exit, into the reader
++// instead of Home (as KOReader sync and the loan-time check return to a book).
++bool PluginCatalogActivity::openDownloadedBook(const std::string& path, const bool sendEvents) {
++  const std::string previous = APP_STATE.openEpubPath;
++  APP_STATE.openEpubPath = path;
++  if (!APP_STATE.saveToFile()) {
++    // The reboot would reopen whatever state.json names; the caller falls back.
++    LOG_ERR("PCAT", "Cannot record the book to open: %s", path.c_str());
++    APP_STATE.openEpubPath = previous;
++    return false;
++  }
++  LOG_INF("PCAT", "Opening in the reader: %s", path.c_str());
++  session.reset();  // free the browse TLS session before the event requests
++  // Report the new book.downloaded now rather than at the next Wi-Fi join. A
++  // copy already on the card queued nothing, and the join that opened the
++  // catalog already drained, so only a fresh download sends.
++  if (sendEvents && wifiConnected()) {
++    // Each event is an HTTPS request (up to the 30 s timeout): show Loading
++    // first. A render still queued from the progress bar paints Loading too.
++    {
++      RenderLock lock;
++      state = State::LOADING;
++      statusMessage = tr(STR_LOADING);
++      GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
++      // Same heap preparation as a download (the caches repopulate on demand).
++      if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
++    }
++    if (ESP.getFreeHeap() >= HttpDownloader::MIN_TLS_FREE_HEAP &&
++        ESP.getMaxAllocHeap() >= HttpDownloader::MIN_TLS_MAX_ALLOC) {
++      pluginevents::drain(nullptr);
++    } else {
++      // Queued events wait for the next Wi-Fi join.
++      LOG_ERR("PCAT", "Low heap for plugin events (%u free, %u max block)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
++    }
++  }
++  Storage.remove(BROWSE_TMP_PATH);  // onExit, which removes it, is skipped by the reboot
++  WiFi.disconnect(false);
++  delay(30);
++  {
++    // Runs from the loop task with no lock held; the restart popup paints
++    // straight to the panel, so keep the render task off the framebuffer.
++    RenderLock lock;
++    silentRestartToReader();
++  }
++  // Only reached when sleep superseded the reboot (and in the simulator).
++  activityManager.goToReader(path);
++  return true;
++}
++
+ // Sign-in and completion states precede the shared catalog input handling.
+ void PluginCatalogActivity::onRowLongPress(const int index) {
+   if (state != State::PLUGIN_PICKER) return;
+@@ -1519,7 +1623,10 @@ void PluginCatalogActivity::showItemDetails(const int itemIndex) {
+   addFact(item.status);
+ 
+   const bool updateAvailable = item.status == tr(STR_UPDATE_AVAILABLE);
+-  spec.actionLabel = updateAvailable ? tr(STR_UPDATE) : (manifest.tracksInstalls() ? tr(STR_INSTALL) : tr(STR_FETCH));
++  spec.actionLabel = updateAvailable             ? tr(STR_UPDATE)
++                     : manifest.tracksInstalls() ? tr(STR_INSTALL)
++                     : rowOpensInReader(item)    ? tr(STR_OPEN)
++                                                 : tr(STR_FETCH);
+ 
+   auto detailsActivity = makeUniqueNoThrow<DetailsActivity>(renderer, mappedInput, std::move(spec));
+   if (!detailsActivity) {
+@@ -1553,7 +1660,8 @@ void PluginCatalogActivity::drawFooter() {
+         const bool onItem = itemSel >= 0 && itemSel < static_cast<int>(items.size());
+         const bool onDir = manifest.isXmlList() && onItem && items[itemSel].isDir;
+         const bool onDetails = !manifest.isXmlList() && onItem && manifest.hasItemDetails();
+-        confirmLabel = count == 0 ? "" : (onDir ? tr(STR_OPEN) : (onDetails ? tr(STR_DETAILS) : tr(STR_FETCH)));
++        const char* fetchLabel = onItem && rowOpensInReader(items[itemSel]) ? tr(STR_OPEN) : tr(STR_FETCH);
++        confirmLabel = count == 0 ? "" : (onDir ? tr(STR_OPEN) : (onDetails ? tr(STR_DETAILS) : fetchLabel));
+       }
+       // On the top row of a searchable catalog the previous-nav slot becomes
+       // Search (front Left), mirroring the OPDS browser's side-button search.
+diff --git a/src/activities/plugins/PluginCatalogActivity.h b/src/activities/plugins/PluginCatalogActivity.h
+index a1f3f35..fd74342 100644
+--- a/src/activities/plugins/PluginCatalogActivity.h
++++ b/src/activities/plugins/PluginCatalogActivity.h
+@@ -6,6 +6,7 @@
+ #include <utility>
+ #include <vector>
+ 
++#include "PluginCatalogOpen.h"
+ #include "PluginCatalogPaging.h"
+ #include "activities/CatalogActivity.h"
+ #include "components/OptionPopup.h"
+@@ -100,6 +101,9 @@ class PluginCatalogActivity final : public CatalogActivity {
+     // Optional HTTP Basic credentials for the file GET (webdav); templates.
+     std::string dlUser, dlPass;
+     std::string destDir, filenameTpl;
++    // download.open: Confirm opens the book in the reader, and a copy already
++    // on the card opens without another download.
++    bool openAfterDownload = false;
+     // Bundle item fields: base URL and relative paths, installed under destDir/subdir.
+     std::string bundleBasePath, bundleFilesPath, bundleSubdir;
+     bool isBundle() const { return !bundleFilesPath.empty(); }
+@@ -227,7 +231,16 @@ class PluginCatalogActivity final : public CatalogActivity {
+   void showItemDetails(int itemIndex);
+   void downloadItem(int itemIndex);
+   HttpDownloader::DownloadError downloadBundle(const Item& item);
+-  HttpDownloader::DownloadError downloadBook(const Item& item);
++  HttpDownloader::DownloadError downloadBook(const Item& item, const std::string& dest);
++  // The sanitized on-SD path a single-file item downloads to (creates the
++  // download folder); false for an unsafe name.
++  bool bookDestination(const Item& item, std::string& dest);
++  // download.open applies to this row, so Confirm reads Open. Side-effect free:
++  // only the sanitized filename's extension matters, so no folder is created.
++  bool rowOpensInReader(const Item& item) const;
++  // download.open: reboot straight into the book. `sendEvents` (a fresh
++  // download) first sends queued plugin events. False if it cannot be recorded.
++  bool openDownloadedBook(const std::string& path, bool sendEvents);
+   void beginAuth();
+   void pollAuth();
+   bool refreshCredentialToken();  // password grant: mint a token from config creds
+diff --git a/src/activities/plugins/PluginCatalogOpen.h b/src/activities/plugins/PluginCatalogOpen.h
+new file mode 100644
+index 0000000..a62a5d4
+--- /dev/null
++++ b/src/activities/plugins/PluginCatalogOpen.h
+@@ -0,0 +1,27 @@
++#pragma once
++
++#include <cstdint>
++
++namespace plugincatalogopen {
++
++// What Confirm on a catalog row does when the manifest sets download.open.
++enum class FetchAction : uint8_t {
++  Download,          // the stock flow: download, then the "Download complete" screen
++  OpenExisting,      // the book is already on the card: open it as is, no request
++  DownloadThenOpen,  // download, then open the new copy
++};
++
++// download.open applies to single-file rows whose destination the reader opens.
++// Those rows label Confirm Open; every other row keeps Fetch.
++constexpr bool opensInReader(const bool openAfterDownload, const bool singleFile, const bool readerBook) {
++  return openAfterDownload && singleFile && readerBook;
++}
++
++// A copy already on the card keeps its layout cache and reading position.
++constexpr FetchAction fetchAction(const bool openAfterDownload, const bool singleFile, const bool readerBook,
++                                  const bool onCard) {
++  if (!opensInReader(openAfterDownload, singleFile, readerBook)) return FetchAction::Download;
++  return onCard ? FetchAction::OpenExisting : FetchAction::DownloadThenOpen;
++}
++
++}  // namespace plugincatalogopen
+diff --git a/src/util/FirmwareIdentity.h b/src/util/FirmwareIdentity.h
+index ed05e90..8f4c6a3 100644
+--- a/src/util/FirmwareIdentity.h
++++ b/src/util/FirmwareIdentity.h
+@@ -6,5 +6,5 @@ inline constexpr const char* FAMILY = "crosspoint";
+ inline constexpr int PLUGIN_API_VERSION = 1;
+ inline constexpr const char* PLUGIN_CAPABILITIES =
+     "catalog.lists,catalog.notices,catalog.bundle_install,catalog.version_tracking,catalog.compatibility,"
+-    "catalog.item_details,catalog.encoded_item_fields";
++    "catalog.item_details,catalog.encoded_item_fields,catalog.open_after_download";
+ }  // namespace firmwareidentity
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index fbceecd..9f57630 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -88,6 +88,7 @@ add_subdirectory(glyph_bitmap)
+ add_subdirectory(clipping_store)
+ add_subdirectory(reader_session)
+ add_subdirectory(plugin_catalog_paging)
++add_subdirectory(plugin_catalog_open)
+ add_subdirectory(plugin_manifest_classification)
+ add_subdirectory(plugin_picker_layout)
+ add_subdirectory(protected_paths)
+diff --git a/test/plugin_catalog_open/CMakeLists.txt b/test/plugin_catalog_open/CMakeLists.txt
+new file mode 100644
+index 0000000..bd32b6a
+--- /dev/null
++++ b/test/plugin_catalog_open/CMakeLists.txt
+@@ -0,0 +1,4 @@
++add_executable(PluginCatalogOpenTest PluginCatalogOpenTest.cpp)
++target_include_directories(PluginCatalogOpenTest PRIVATE ${REPO_ROOT}/src/activities/plugins ${REPO_ROOT}/src)
++target_link_libraries(PluginCatalogOpenTest PRIVATE crosspoint_test_common GTest::gtest_main)
++gtest_discover_tests(PluginCatalogOpenTest)
+diff --git a/test/plugin_catalog_open/PluginCatalogOpenTest.cpp b/test/plugin_catalog_open/PluginCatalogOpenTest.cpp
+new file mode 100644
+index 0000000..5b07bb8
+--- /dev/null
++++ b/test/plugin_catalog_open/PluginCatalogOpenTest.cpp
+@@ -0,0 +1,45 @@
++#include <gtest/gtest.h>
++
++#include <string_view>
++
++#include "PluginCatalogOpen.h"
++#include "util/FirmwareIdentity.h"
++
++using plugincatalogopen::FetchAction;
++using plugincatalogopen::fetchAction;
++using plugincatalogopen::opensInReader;
++
++TEST(PluginCatalogOpen, WithoutTheFlagEveryRowDownloads) {
++  EXPECT_EQ(fetchAction(false, true, true, false), FetchAction::Download);
++  EXPECT_EQ(fetchAction(false, true, true, true), FetchAction::Download);
++}
++
++TEST(PluginCatalogOpen, BundlesAndOtherFilesKeepTheDownloadScreen) {
++  EXPECT_EQ(fetchAction(true, false, false, false), FetchAction::Download);  // bundle row
++  EXPECT_EQ(fetchAction(true, true, false, true), FetchAction::Download);    // e.g. a .pdf already on the card
++}
++
++TEST(PluginCatalogOpen, ABookOnTheCardOpensWithoutADownload) {
++  EXPECT_EQ(fetchAction(true, true, true, true), FetchAction::OpenExisting);
++}
++
++TEST(PluginCatalogOpen, ANewBookDownloadsThenOpens) {
++  EXPECT_EQ(fetchAction(true, true, true, false), FetchAction::DownloadThenOpen);
++}
++
++// The Confirm label reads Open exactly on the rows that open in the reader.
++TEST(PluginCatalogOpen, TheOpenLabelMatchesTheAction) {
++  for (int bits = 0; bits < 16; ++bits) {
++    const bool open = bits & 1, singleFile = bits & 2, readerBook = bits & 4, onCard = bits & 8;
++    EXPECT_EQ(opensInReader(open, singleFile, readerBook),
++              fetchAction(open, singleFile, readerBook, onCard) != FetchAction::Download)
++        << "bits " << bits;
++  }
++  EXPECT_FALSE(opensInReader(true, false, true));  // bundle row: Fetch
++  EXPECT_FALSE(opensInReader(true, true, false));  // e.g. a .pdf: Fetch
++}
++
++TEST(PluginCatalogOpen, CapabilityIsAdvertised) {
++  EXPECT_NE(std::string_view(firmwareidentity::PLUGIN_CAPABILITIES).find("catalog.open_after_download"),
++            std::string_view::npos);
++}
+-- 
+2.50.1 (Apple Git-155)
+

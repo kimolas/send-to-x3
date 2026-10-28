@@ -17,7 +17,7 @@ import pytest
 from sendtox3 import delivery
 from sendtox3.ingest import Processor
 from sendtox3.models import IngestRequest, Item, new_item_id
-from sendtox3.store import FILE_MODE, ISSUED_TITLE_DAYS, Store, write_file
+from sendtox3.store import FILE_MODE, Store, write_file
 from sendtox3.textmodel import Document
 
 from test_web_fakes import install_fakes
@@ -53,24 +53,40 @@ def _old_database(data_dir, rows: list[tuple[str, dict]], *, now: int) -> None:
 
 def test_titles_downloaded_before_the_upgrade_are_backfilled(data_dir):
     now = int(time.time())
-    old = now - (ISSUED_TITLE_DAYS + 5) * 86400
+    old = now - 800 * 86400
     _old_database(data_dir, [
         ("Morning Briefing", {"catalog": now - 3600}),
         ("OPDS Book", {"opds": now - 7200, "auto": now - 9000}),
         ("Auto Only", {"auto": now - 3600}),  # sent in a digest: not saved under its title
-        ("Pushed", {"push": now - 3600}),
+        ("Pushed", {"push": now - 3600}),  # LAN push saves <title>.epub too
         ("Never Sent", {}),
-        ("Ancient", {"catalog": old}),  # past the reservation window already
+        ("Ancient", {"catalog": old}),  # reservations never expire: its file may be on the card
     ], now=now)
     store = Store(data_dir)
     try:
-        assert store.issued_titles() == {"Morning Briefing", "OPDS Book"}
+        assert store.issued_titles() == {"Morning Briefing", "OPDS Book", "Pushed", "Ancient"}
         rows = dict(store._db.execute("SELECT title, issued_at FROM issued_titles").fetchall())
         assert rows["Morning Briefing"] == now - 3600 and rows["OPDS Book"] == now - 7200
         # Deleting or pruning the item no longer frees its title.
         for it in store.list_items(limit=100):
             store.delete(it.id)
-        assert {"Morning Briefing", "OPDS Book"} <= store.issued_titles()
+        assert {"Morning Briefing", "OPDS Book", "Pushed", "Ancient"} <= store.issued_titles()
+    finally:
+        store.close()
+
+
+def test_pushed_titles_are_backfilled_after_the_first_migration(data_dir):
+    """A database from 0.2.0: catalog and OPDS titles were reserved, pushed ones not."""
+    now = int(time.time())
+    _old_database(data_dir, [("Pushed", {"push": now - 3600}), ("Auto Only", {"auto": now - 60})], now=now)
+    db = sqlite3.connect(data_dir / "sendtox3.db")
+    db.execute("INSERT INTO kv (k, v) VALUES ('migration:issued_titles_backfill', '1')")
+    db.commit()
+    db.close()
+    store = Store(data_dir)
+    try:
+        assert store.issued_titles() == {"Pushed"}
+        assert store.kv_get("migration:issued_titles_backfill_push") == "1"
     finally:
         store.close()
 

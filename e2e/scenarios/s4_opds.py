@@ -22,7 +22,7 @@ from e2e.sim.runner import InputScript, run_sim
 from .base import Context, epub_info, scenario, valid_epub
 
 
-@scenario("S4", "OPDS browse + download", firmwares=("2.0.0rc", "1.6.5"))
+@scenario("S4", "OPDS browse + download", firmwares=("2.0.0rc", "1.6.5", "develop", "fork"))
 def run(ctx: Context) -> None:
     backend, tap = ctx.start_backend()
     older = backend.seed(title="Older OPDS entry", text="Second in the feed.")

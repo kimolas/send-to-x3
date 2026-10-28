@@ -10,6 +10,8 @@ Firmware facts (docs/ARCHITECTURE.md §10, research report plugins-catalog.md):
   ``{cfg.server}`` can never break the URLs.
 - A JSON catalog never falls back to ``fields.url``: ``download.url`` is required.
 - Event downloads do not create folders, so ``/Inbox`` must exist (``Inbox/.keep``).
+- ``download.open`` is read only by the Send to X3 firmware (capability
+  ``catalog.open_after_download``): Confirm then opens the book. Stock firmware ignores it.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .config import Options
+from .delivery import PAGE_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +42,9 @@ MANIFEST_MAX_BYTES = 8 * 1024
 DELIVERY_TOAST = "Send to X3: new reading delivered"
 #: Where the (off by default) plugin switch lives on the X3 (SettingsList.cpp:193-194).
 PLUGINS_SWITCH = "Settings > Connectivity > Plugins"
+#: ``/api/status`` ``pluginCapabilities`` token of firmware that reads ``download.open``
+#: (the Send to X3 firmware, docs/FIRMWARE.md; FirmwareIdentity.h).
+OPEN_CAPABILITY = "catalog.open_after_download"
 #: CrossPoint 2.0.0rc looks up the saved Wi-Fi password at sleep without loading
 #: wifi.json (main.cpp:405; only WifiSelectionActivity loads it), and every wake is a
 #: reboot, so a plain wake -> read -> sleep only queues the event. Fixed upstream after
@@ -129,6 +135,10 @@ def build_device_json(*, base_url: str, device_token: str, opts: Options) -> dic
     which for the plugin is before its list loads. With ``auto_delivery`` the events are
     ``sleep.enter`` only: its "nothing new" answers keep its line queued, which would hold
     back the reports queued behind it, so downloads are marked as they are sent instead.
+
+    ``{offset}`` makes develop c3b16da (2026-10-27) and later page by offset with a
+    lookahead row; older firmware sends it as the literal text (``delivery.catalog_page``).
+    ``download.open`` makes Confirm open the book on the Send to X3 firmware.
     """
     base = normalize_base_url(base_url)
     token = _check_token(device_token)
@@ -140,17 +150,18 @@ def build_device_json(*, base_url: str, device_token: str, opts: Options) -> dic
         "description": PLUGIN_DESCRIPTION,
         "browse": {
             "format": "json",
-            "url": f"{base}/device/v1/catalog?page={{page}}&limit={{limit}}",
+            "url": f"{base}/device/v1/catalog?page={{page}}&limit={{limit}}&offset={{offset}}",
             "headers": {"Authorization": auth},
             "items": "items",
             "fields": {"title": "title", "author": "subtitle", "id": "id"},
-            "page_size": 8,
+            "page_size": PAGE_SIZE,
         },
         "download": {
             "url": f"{base}/device/v1/items/{{id}}.{fmt}" + ("" if opts.auto_delivery else "?confirm=1"),
             "headers": {"Authorization": auth},
             "dest_dir": inbox,
             "filename": f"{{title}}.{fmt}",
+            "open": True,
         },
     }
     if opts.auto_delivery:
@@ -198,15 +209,17 @@ def readme_bytes(*, base_url: str, opts: Options) -> bytes:
     auto = (
         f"- When the X3 goes to sleep on your home Wi-Fi it fetches everything new as one\n"
         f"  EPUB into {inbox} (a short \"Loading\" popup, then the toast \"{DELIVERY_TOAST}\").\n"
+        f"  It waits in the Library: only Confirm opens a book.\n"
         f"  {SLEEP_DELIVERY_CAVEAT}\n"
         if opts.auto_delivery
         else "- Nothing is downloaded by itself (delivery at sleep, option auto_delivery, is off).\n"
     )
     confirm = (
         "" if opts.auto_delivery else
-        " The X3 tells the app which files it saved\n"
-        "  the next time it joins Wi-Fi (after you go back to Home and open Send to X3\n"
-        "  again), which is why Home > Plugins says \"Receives: downloads\". A cancelled\n"
+        " The X3 tells the app which files it saved,\n"
+        "  which is why Home > Plugins says \"Receives: downloads\": the Send to X3\n"
+        "  firmware right before the book opens, other builds the next time the X3 joins\n"
+        "  Wi-Fi (after you go back to Home and open Send to X3 again). A cancelled\n"
         "  download is offered again."
     )
     text = f"""# Send to X3
@@ -220,6 +233,13 @@ Assistant at {normalize_base_url(base_url)}.
 - Home > Plugins > Send to X3, then Confirm on the first row, "Get 3 new": everything
   shared since the last fetch is saved as one book into {inbox}. With nothing new the
   row reads "Nothing new right now".{confirm}
+- What Confirm does depends on the firmware. On the Send to X3 firmware (CrossPoint
+  plus one change, see docs/FIRMWARE.md in the app's repository) it reads "Open" and
+  opens the book right away. Open on a row that saved its book before opens that
+  copy where you left off. Reopen a "Get N new" book from Home or the Library: Open
+  on one of its items' own rows downloads a separate copy that starts at page 1. On
+  other CrossPoint builds Confirm saves the book and shows "Download complete"; open
+  it from the Library.
 - The rows below list everything you shared, newest first. Select one to download it
   on its own. The subtitle says whether the X3 already received it.
 {auto}
@@ -281,6 +301,23 @@ def plugin_files(*, base_url: str, device_token: str, opts: Options) -> dict[str
 # --------------------------------------------------------------------------------------
 
 
+def opens_books(status: Any) -> bool:
+    """True when ``/api/status`` comes from firmware whose Confirm opens a catalog book
+    (``download.open``): ``pluginCapabilities`` lists :data:`OPEN_CAPABILITY`."""
+    caps = status.get("pluginCapabilities") if isinstance(status, dict) else None
+    if isinstance(caps, str):
+        caps = caps.split(",")
+    return isinstance(caps, list) and OPEN_CAPABILITY in (str(c).strip() for c in caps)
+
+
+def confirm_behaviour(status: Any) -> str:
+    """One install-log line: what Confirm does on this X3."""
+    if opens_books(status):
+        return "Confirm opens the book: this X3's firmware opens catalog downloads in the reader."
+    return ("Confirm downloads; install the Send to X3 firmware to open books directly "
+            "(docs/FIRMWARE.md).")
+
+
 def _firmware_major(version: str) -> Optional[int]:
     m = re.match(r"\s*v?(\d+)\.", version or "")
     return int(m.group(1)) if m else None
@@ -339,6 +376,7 @@ async def install_to_device(device_host: str, *, base_url: str, device_token: st
             lines.append(f"Error: CrossPoint {version} has no plugin support. Use the OPDS feed instead "
                          "(see Setup), or update the X3 to CrossPoint 2.0.")
             return lines
+        lines.append(confirm_behaviour(status))
 
         inbox_parent, inbox_name = inbox.rsplit("/", 1)
         try:

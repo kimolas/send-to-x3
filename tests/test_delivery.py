@@ -198,6 +198,20 @@ def test_exact_offsets(store, page, limit, start, count):
     assert _ids(catalog_page(store, page, limit)) == rows[start:start + count]
 
 
+@pytest.mark.parametrize("page,limit,offset,start,count", [
+    (2, 9, None, 8, 9), (3, 9, None, 16, 5),  # 2.0.0rc, 3f387a9: (page - 1) * (limit - 1)
+    (2, 9, 8, 8, 9), (3, 9, 16, 16, 5),  # develop 8f4d035+: the offset it sends
+    (1, 9, 16, 16, 5), (3, 9, 0, 0, 9),  # the offset wins over the page
+    (2, 8, None, 8, 8), (3, 8, None, 16, 5),  # develop with a 0.2.0 plugin: (page - 1) * limit
+])
+def test_start_row_per_firmware(store, page, limit, offset, start, count):
+    for i in range(20):
+        add_item(store, f"Item {i}", created_at=1000 + i)
+    rows = _rows(store)
+    assert delivery.PAGE_SIZE == 8
+    assert _ids(catalog_page(store, page, limit, offset=offset)) == rows[start:start + count]
+
+
 def test_paging_is_clamped(store):
     items = [add_item(store, f"Item {i}", created_at=1000 + i) for i in range(30)]
     assert len(catalog_page(store, 1, 1)["items"]) == 2  # limit >= 2

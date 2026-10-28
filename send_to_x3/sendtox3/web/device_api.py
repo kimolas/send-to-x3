@@ -1,7 +1,7 @@
 """Endpoints for the CrossPoint 2.x plugin (``Authorization: Bearer <device_token>``).
 
-- ``GET /device/v1/catalog?page=P&limit=L``  catalog rows (JSON); the first row is "Get N new"
-  (or "Nothing new right now")
+- ``GET /device/v1/catalog?page=P&limit=L&offset=O``  catalog rows (JSON); the first row is
+  "Get N new" (or "Nothing new right now"); ``offset`` only from newer firmware
 - ``GET /device/v1/items/<id>.epub|.txt``    one item; marks ``delivered.catalog``
 - ``GET /device/v1/items/all-<key>.epub|.txt`` the "Get N new" bundle; marks ``delivered.fetch``
   once all of it was sent, or, with ``?confirm=1`` (the plugin reports saved files), when the
@@ -33,6 +33,8 @@ ITEM_ID_RE = r"[a-z2-7]{10}"
 _EVENT_PARAM = re.compile(r"^[A-Za-z0-9._~-]{1,64}$")
 AUTO_DELIVERY_OFF_WARNING = ("The X3 still requests sleep delivery although auto_delivery is off: reinstall the "
                              "plugin to stop it (it also joins Wi-Fi at each sleep).")
+OLD_PLUGIN_WARNING = ("The X3 uses the plugin from Send to X3 0.2.0 or older: install it again from Setup (needed for "
+                      "Open on the Send to X3 firmware, and for paging on new CrossPoint builds).")
 
 
 def _authorized(request: web.Request) -> bool:
@@ -44,7 +46,13 @@ def _unauthorized() -> web.Response:
 
 
 def _seen(request: web.Request, detail: str) -> None:
-    get_state(request).set_status("device_api", "ok", detail)
+    state = get_state(request)
+    if (state.status.get("device_api") or {}).get("old_plugin"):
+        # The download right after the catalog must not hide it: kept until a catalog
+        # request shows the current device.json.
+        state.set_status("device_api", "warning", f"{OLD_PLUGIN_WARNING} Last request: {detail}.", old_plugin=True)
+    else:
+        state.set_status("device_api", "ok", detail)
 
 
 async def catalog(request: web.Request) -> web.Response:
@@ -52,13 +60,26 @@ async def catalog(request: web.Request) -> web.Response:
         return _unauthorized()
     state = get_state(request)
     page = parse_int(request.query.get("page"), 1)
-    limit = parse_int(request.query.get("limit"), 9)
-    body = await asyncio.to_thread(delivery.catalog_page, state.store, page, limit,
-                                   fmt=state.opts.delivery_format)
-    if body["items"] and body["items"][0].get("title") == delivery.FETCH_FAILED_TITLE:
-        state.set_status("device_api", "warning", "\"Get N new\" could not be prepared; see the log")
+    limit = parse_int(request.query.get("limit"), delivery.PAGE_SIZE + 1)
+    # 2.0.0rc and develop 3f387a9 do not know {offset} and send it as the literal text.
+    raw_offset = request.query.get("offset", "")
+    if raw_offset.isascii() and raw_offset.isdigit():
+        # int() refuses more than 4300 digits; anything over 19 is past the end anyway.
+        offset = int(raw_offset) if len(raw_offset) <= 19 else delivery.START_MAX
     else:
-        _seen(request, f"catalog page {max(1, page)}")
+        offset = None
+    body = await asyncio.to_thread(delivery.catalog_page, state.store, page, limit, offset=offset,
+                                   fmt=state.opts.delivery_format)
+    # Only develop c3b16da and later (the Send to X3 firmware too) send limit = page_size,
+    # and only with a device.json that has no {offset}: one from 0.2.0 or older.
+    old_plugin = "offset" not in request.query and limit == delivery.PAGE_SIZE
+    if body["items"] and body["items"][0].get("title") == delivery.FETCH_FAILED_TITLE:
+        state.set_status("device_api", "warning", "\"Get N new\" could not be prepared; see the log",
+                         old_plugin=old_plugin)
+    elif old_plugin:
+        state.set_status("device_api", "warning", OLD_PLUGIN_WARNING, old_plugin=True)
+    else:
+        state.set_status("device_api", "ok", f"catalog page {max(1, page)}")
     return bytes_response(json_bytes(body), "application/json; charset=utf-8")
 
 
@@ -122,7 +143,7 @@ async def fetch_file(request: web.Request) -> web.StreamResponse:
         _seen(request, f"the X3 stopped downloading {bundle.title!r}; it stays new")
     else:
         _seen(request, f"sent {bundle.title!r} ({len(bundle.data):,} bytes)"
-                       + ("; the X3 confirms it the next time it joins Wi-Fi" if confirm else ""))
+                       + ("; waiting for the X3 to confirm it" if confirm else ""))
     return resp
 
 
